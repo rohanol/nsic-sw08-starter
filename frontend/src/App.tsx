@@ -1,68 +1,16 @@
-import { useState, useRef, useEffect } from "react";
-import { AlertTriangle, Crosshair, Gauge, ShieldCheck, Satellite, Upload, Image as ImageIcon, Layers, Cpu } from "lucide-react";
+import { useMemo, useState } from "react";
+import type { ReactNode } from "react";
+import { AlertTriangle, Crosshair, Gauge, ShieldCheck, Satellite } from "lucide-react";
 
-export default function App() {
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [file, setFile] = useState<File | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [results, setResults] = useState<any>(null);
-  const [viewMode, setViewMode] = useState<'annotated' | 'heatmap' | 'depth_map'>('annotated');
-  const [engine, setEngine] = useState<'cv' | 'ml'>('cv');
-  const [backendHealth, setBackendHealth] = useState<any>(null);
-  
-  const fileInputRef = useRef<HTMLInputElement>(null);
+const zones = [
+  { id: "A-01", name: "North Ridge", risk: 0.18, confidence: 0.82, tags: ["flat", "high-light"] },
+  { id: "B-04", name: "Crater Edge", risk: 0.47, confidence: 0.71, tags: ["ice-signal", "uneven"] },
+  { id: "C-07", name: "South Basin", risk: 0.76, confidence: 0.64, tags: ["shadowed", "rocky"] },
+];
 
-  useEffect(() => {
-    // Check backend health on load
-    fetch("http://localhost:8000/health")
-      .then(res => res.json())
-      .then(data => setBackendHealth(data))
-      .catch(err => console.error("Backend not running", err));
-  }, []);
-
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const selectedFile = e.target.files[0];
-      setFile(selectedFile);
-      setSelectedImage(URL.createObjectURL(selectedFile));
-      setResults(null);
-    }
-  };
-
-  const runAnalysis = async () => {
-    if (!file) return;
-    setLoading(true);
-    
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("engine", engine);
-
-    try {
-      const response = await fetch("http://localhost:8000/api/v1/assessments", {
-        method: "POST",
-        body: formData,
-      });
-      const data = await response.json();
-      
-      if (data.stats && data.stats.error) {
-        alert("Backend Error: " + data.stats.error);
-        setResults(null);
-      } else {
-        setResults(data);
-        if (engine === 'ml' && viewMode === 'annotated') {
-           // Default to depth map if ML mode runs for cooler effect
-           setViewMode('depth_map');
-        } else if (engine === 'cv' && viewMode === 'depth_map') {
-           setViewMode('annotated');
-        }
-      }
-    } catch (err) {
-      console.error("Error running assessment:", err);
-      alert("Failed to reach backend. Ensure FastAPI is running on port 8000.");
-    } finally {
-      setLoading(false);
-    }
-  };
+function App() {
+  const [activeZone, setActiveZone] = useState("A-01");
+  const selected = useMemo(() => zones.find((zone) => zone.id === activeZone) ?? zones[0], [activeZone]);
 
   return (
     <main className="app-shell">
@@ -70,149 +18,80 @@ export default function App() {
         <div className="brand-lockup">
           <div className="brand-mark"><Satellite size={20} /></div>
           <div>
-            <p className="eyebrow">NSIC · SW08 (DUAL ENGINE)</p>
-            <h1>AegisLanding System</h1>
+            <p className="eyebrow">NSIC · SW08</p>
+            <h1>AegisLanding</h1>
           </div>
         </div>
-        <div className="system-status">
-          <span className={`status-dot ${backendHealth ? 'active' : ''}`} /> 
-          {backendHealth ? `Backend Online (ML: ${backendHealth.ml_available ? 'Ready' : 'Offline'})` : 'Backend Offline'}
-        </div>
+        <div className="system-status"><span className="status-dot" /> Simulation mode · data contract ready</div>
       </header>
 
       <section className="hero-grid">
         <div>
-          <p className="eyebrow">HYBRID RISK ASSESSMENT</p>
-          <h2>Analyze real planetary terrain.</h2>
-          <p className="hero-copy">Choose between Classical OpenCV algorithms (100% compliant) or pre-trained AI models (Depth Anything V2) to extract terrain geometry and find safe landing zones.</p>
-          
-          <div className="engine-toggle">
-            <button 
-              className={`toggle-pill ${engine === 'cv' ? 'active' : ''}`}
-              onClick={() => setEngine('cv')}
-            >
-              <Cpu size={16} /> OpenCV (Classical)
-            </button>
-            <button 
-              className={`toggle-pill ${engine === 'ml' ? 'active' : ''}`}
-              onClick={() => setEngine('ml')}
-            >
-              <Layers size={16} /> Depth Anything V2 (AI)
-            </button>
-          </div>
+          <p className="eyebrow">AI-BASED LANDING RISK ASSESSMENT</p>
+          <h2>Find the safest place to land.</h2>
+          <p className="hero-copy">A decision-support dashboard for detecting terrain hazards, scoring candidate landing zones, and explaining the recommendation.</p>
         </div>
-        
-        <div className="hero-actions">
-           <input type="file" accept="image/*" className="hidden-input" ref={fileInputRef} onChange={handleImageUpload} style={{display:'none'}} />
-           <button className="primary-button" onClick={() => fileInputRef.current?.click()}>
-             <Upload size={18} /> Upload Terrain Image
-           </button>
-           {file && (
-             <button className="primary-button run-button" onClick={runAnalysis} disabled={loading}>
-               {loading ? "Analyzing..." : `Run ${engine.toUpperCase()} Assessment →`}
-             </button>
-           )}
+        <div className="hero-callout">
+          <span className="callout-label">Current recommendation</span>
+          <strong>{selected.name}</strong>
+          <span>{Math.round((1 - selected.risk) * 100)}% safety score · {Math.round(selected.confidence * 100)}% confidence</span>
         </div>
       </section>
 
-      {results && (
-        <section className="metric-grid" aria-label="Mission metrics">
-          <Metric icon={<Gauge size={19} />} label="Global Roughness" value={results.stats.global_roughness_index} tone="amber" />
-          <Metric icon={<Crosshair size={19} />} label="Craters Detected" value={results.stats.craters_detected.toString()} tone="blue" />
-          <Metric icon={<AlertTriangle size={19} />} label="Rocks/Obstacles" value={results.stats.rocks_detected.toString()} tone="red" />
-          <Metric icon={<ShieldCheck size={19} />} label="Safe Zones" value={results.safe_zones.length.toString()} tone="green" />
-        </section>
-      )}
+      <section className="metric-grid" aria-label="Mission metrics">
+        <Metric icon={<Gauge size={19} />} label="Mission risk" value={`${Math.round(selected.risk * 100)}%`} tone="amber" />
+        <Metric icon={<Crosshair size={19} />} label="Zones assessed" value="03" tone="blue" />
+        <Metric icon={<ShieldCheck size={19} />} label="Data integrity" value="Verified" tone="green" />
+        <Metric icon={<AlertTriangle size={19} />} label="Active hazards" value="02" tone="red" />
+      </section>
 
       <section className="workspace-grid">
         <div className="panel map-panel">
-          <div className="panel-heading">
-            <div><p className="eyebrow">TERRAIN OVERVIEW</p><h3>Visual Telemetry</h3></div>
-            {results && (
-              <div className="view-toggles">
-                <button className={`toggle-btn ${viewMode === 'annotated' ? 'active' : ''}`} onClick={() => setViewMode('annotated')}>Annotations</button>
-                <button className={`toggle-btn ${viewMode === 'heatmap' ? 'active' : ''}`} onClick={() => setViewMode('heatmap')}>Risk Heatmap</button>
-                {results.images.depth_map && (
-                  <button className={`toggle-btn ${viewMode === 'depth_map' ? 'active' : ''}`} onClick={() => setViewMode('depth_map')}>Depth Map (ML)</button>
-                )}
-              </div>
-            )}
-          </div>
-          <div className="terrain-map cv-view">
-            {!selectedImage ? (
-              <div className="empty-state">
-                <ImageIcon size={48} />
-                <p>Upload an image to view terrain.</p>
-              </div>
-            ) : (
-              <img 
-                src={results ? results.images[viewMode] : selectedImage} 
-                alt="Terrain Analysis" 
-                className="terrain-image" 
-              />
-            )}
+          <div className="panel-heading"><div><p className="eyebrow">TERRAIN OVERVIEW</p><h3>Candidate landing zones</h3></div><span className="panel-chip">DEMO DATA</span></div>
+          <div className="terrain-map">
+            <div className="terrain-grid" />
+            {zones.map((zone, index) => (
+              <button key={zone.id} className={`zone-marker zone-${index + 1} ${activeZone === zone.id ? "selected" : ""}`} onClick={() => setActiveZone(zone.id)} aria-label={`Select ${zone.name}`}>
+                <span>{zone.id}</span>
+              </button>
+            ))}
+            <div className="map-legend"><span><i className="legend-safe" /> lower risk</span><span><i className="legend-danger" /> higher risk</span></div>
           </div>
         </div>
 
         <div className="panel assessment-panel">
-          <div className="panel-heading"><div><p className="eyebrow">ASSESSMENT OUTPUT</p><h3>Optimal Safe Zones</h3></div></div>
-          
-          <div className="zone-table">
-            {!results ? (
-              <p className="disclaimer" style={{marginTop: '20px'}}>Run assessment to discover safe zones.</p>
-            ) : results.safe_zones.length === 0 ? (
-              <p className="disclaimer" style={{marginTop: '20px', color: '#ff3366'}}>CRITICAL: No safe landing zones found!</p>
-            ) : (
-              <>
-                <div className="table-row table-header">
-                  <span>Zone ID</span>
-                  <span>Coordinates</span>
-                  <span>Safe Area</span>
-                  <span>Avg Risk</span>
-                </div>
-                {results.safe_zones.map((zone: any) => (
-                  <div className="table-row" key={zone.id}>
-                    <span><strong>{zone.id}</strong></span>
-                    <span>X: {zone.x}, Y: {zone.y}</span>
-                    <span>{Math.round(zone.area)} px²</span>
-                    <span style={{color: '#00ff88'}}>{zone.avg_risk.toFixed(1)}</span>
-                  </div>
-                ))}
-              </>
-            )}
+          <div className="panel-heading"><div><p className="eyebrow">ASSESSMENT OUTPUT</p><h3>{selected.name}</h3></div><span className={`risk-badge ${selected.risk < 0.3 ? "safe" : selected.risk < 0.6 ? "watch" : "danger"}`}>{selected.risk < 0.3 ? "LOW RISK" : selected.risk < 0.6 ? "WATCH" : "HIGH RISK"}</span></div>
+          <div className="risk-score"><span className="score-value">{Math.round((1 - selected.risk) * 100)}</span><span className="score-label">safety score</span></div>
+          <div className="factor-list">
+            <Factor label="Terrain flatness" value={selected.id === "A-01" ? "Strong" : "Moderate"} positive={selected.id === "A-01"} />
+            <Factor label="Rock / crater exposure" value={selected.id === "C-07" ? "Severe" : "Low"} positive={selected.id !== "C-07"} />
+            <Factor label="Illumination window" value={selected.id === "A-01" ? "Stable" : "Variable"} positive={selected.id === "A-01"} />
+            <Factor label="Input integrity" value="Verified" positive />
           </div>
-          
-          {results && (
-             <div className="legend-box">
-                <h4>Legend</h4>
-                <div className="legend-item"><span className="dot" style={{borderColor: '#00ff00'}}></span> Safe Landing Zone</div>
-                {engine === 'cv' && (
-                  <>
-                    <div className="legend-item"><span className="dot" style={{borderColor: '#ffa500'}}></span> Crater Detected</div>
-                    <div className="legend-item"><span className="dot solid" style={{backgroundColor: '#ff0000'}}></span> Rock / Obstacle</div>
-                  </>
-                )}
-             </div>
-          )}
+          <button className="primary-button">Run assessment <span>→</span></button>
+          <p className="disclaimer">Starter UI only. Replace demo values with validated terrain features and a documented model during the hackathon.</p>
         </div>
       </section>
 
-      <footer className="footer">
-        <span>AegisLanding Dual Engine System</span>
-        <span>Validating both classical math and AI approaches.</span>
-      </footer>
+      <section className="panel zones-panel">
+        <div className="panel-heading"><div><p className="eyebrow">RANKED OUTPUT</p><h3>Zone comparison</h3></div><span className="panel-chip">MODEL: UNIMPLEMENTED</span></div>
+        <div className="zone-table">
+          <div className="table-row table-header"><span>Zone</span><span>Risk</span><span>Confidence</span><span>Signals</span></div>
+          {zones.map((zone) => <button className={`table-row ${activeZone === zone.id ? "active-row" : ""}`} key={zone.id} onClick={() => setActiveZone(zone.id)}><span><strong>{zone.id}</strong> {zone.name}</span><span>{Math.round(zone.risk * 100)}%</span><span>{Math.round(zone.confidence * 100)}%</span><span>{zone.tags.map((tag) => <em key={tag}>{tag}</em>)}</span></button>)}
+        </div>
+      </section>
+
+      <footer className="footer"><span>AegisLanding · original team scaffold</span><span>Validate every model decision before presenting.</span></footer>
     </main>
   );
 }
 
-function Metric({ icon, label, value, tone }: { icon: React.ReactNode; label: string; value: string | number; tone: string }) {
-  return (
-    <div className={`metric-card tone-${tone}`}>
-      <span className="metric-icon">{icon}</span>
-      <div>
-        <span className="metric-label">{label}</span>
-        <strong>{value}</strong>
-      </div>
-    </div>
-  );
+function Metric({ icon, label, value, tone }: { icon: ReactNode; label: string; value: string; tone: string }) {
+  return <div className={`metric-card tone-${tone}`}><span className="metric-icon">{icon}</span><div><span className="metric-label">{label}</span><strong>{value}</strong></div></div>;
 }
+
+function Factor({ label, value, positive }: { label: string; value: string; positive: boolean }) {
+  return <div className="factor-row"><span>{label}</span><strong className={positive ? "positive" : "negative"}>{value}</strong></div>;
+}
+
+export default App;

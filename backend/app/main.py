@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.cv_engine import CVElevationAnalyzer
-from app.ml_engine import MLElevationAnalyzer, ML_AVAILABLE
+from app.ml_engine import MLElevationAnalyzer
 from app.database import init_db, log_assessment
 
 app = FastAPI(
@@ -37,8 +37,7 @@ class AssessmentResponse(BaseModel):
 def health() -> dict[str, Any]:
     return {
         "status": "ok", 
-        "service": "aegislanding-api",
-        "ml_available": ML_AVAILABLE
+        "service": "aegislanding-api"
     }
 
 @app.post("/api/v1/assessments", response_model=AssessmentResponse)
@@ -53,12 +52,7 @@ async def create_assessment(
     contents = await file.read()
     
     if engine == "ml":
-        if not ML_AVAILABLE:
-            return AssessmentResponse(
-                stats={"error": "ML dependencies not installed on server."},
-                safe_zones=[],
-                images={}
-            )
+        # The AI teammate will implement ml_analyzer.analyze_terrain(contents)
         results = ml_analyzer.analyze_terrain(contents)
     else:
         # Default to CV engine
