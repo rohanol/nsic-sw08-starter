@@ -1,58 +1,63 @@
-from typing import Any
+from typing import Any, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
+from app.cv_engine import CVElevationAnalyzer
+from app.ml_engine import MLElevationAnalyzer, ML_AVAILABLE
 
 app = FastAPI(
-    title="AegisLanding API",
-    version="0.1.0",
-    description="Starter API for NSIC SW08 AI-Based Landing Risk Assessment.",
+    title="AegisLanding API with Dual Engines",
+    version="0.3.0",
+    description="Backend API for NSIC SW08 AI-Based Landing Risk Assessment.",
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "*"],
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-class AssessmentRequest(BaseModel):
-    scenario_id: str = Field(default="demo", min_length=1, max_length=100)
-    candidate_zones: list[dict[str, Any]] = Field(default_factory=list)
-
+cv_analyzer = CVElevationAnalyzer(lander_size_px=30)
+ml_analyzer = MLElevationAnalyzer(lander_size_px=30)
 
 class AssessmentResponse(BaseModel):
-    assessment_id: str
-    candidate_zones: list[dict[str, Any]]
-    recommended_zone_id: str | None = None
-    overall_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
-    explanations: list[str] = Field(default_factory=list)
-    data_quality: dict[str, Any] = Field(default_factory=dict)
-    model_version: str = "unimplemented"
-
+    stats: dict[str, Any]
+    safe_zones: list[dict[str, Any]]
+    images: dict[str, str]
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "service": "aegislanding-api"}
-
+def health() -> dict[str, Any]:
+    return {
+        "status": "ok", 
+        "service": "aegislanding-api",
+        "ml_available": ML_AVAILABLE
+    }
 
 @app.post("/api/v1/assessments", response_model=AssessmentResponse)
-def create_assessment(payload: AssessmentRequest) -> AssessmentResponse:
-    """Return a deliberately unimplemented contract until the team chooses its model.
-
-    Keeping this endpoint deterministic makes frontend work possible before the
-    data and model choices are finalized during the hackathon.
+async def create_assessment(
+    file: UploadFile = File(...),
+    engine: str = Form("cv")
+) -> AssessmentResponse:
     """
-
-    return AssessmentResponse(
-        assessment_id=f"{payload.scenario_id}-starter",
-        candidate_zones=payload.candidate_zones,
-        explanations=[
-            "Assessment logic is intentionally not implemented in the starter.",
-            "Add validated terrain features and a documented risk model here.",
-        ],
-    )
+    Process an uploaded terrain image.
+    engine: 'cv' for OpenCV classical math, 'ml' for Depth Anything V2 ML model.
+    """
+    contents = await file.read()
+    
+    if engine == "ml":
+        if not ML_AVAILABLE:
+            return AssessmentResponse(
+                stats={"error": "ML dependencies not installed on server."},
+                safe_zones=[],
+                images={}
+            )
+        results = ml_analyzer.analyze_terrain(contents)
+    else:
+        # Default to CV engine
+        results = cv_analyzer.analyze_terrain(contents)
+        
+    return AssessmentResponse(**results)
