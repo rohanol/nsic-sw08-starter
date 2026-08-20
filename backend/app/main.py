@@ -6,12 +6,16 @@ from pydantic import BaseModel
 
 from app.cv_engine import CVElevationAnalyzer
 from app.ml_engine import MLElevationAnalyzer, ML_AVAILABLE
+from app.database import init_db, log_assessment
 
 app = FastAPI(
     title="AegisLanding API with Dual Engines",
     version="0.3.0",
     description="Backend API for NSIC SW08 AI-Based Landing Risk Assessment.",
 )
+
+# Initialize audit database
+init_db()
 
 app.add_middleware(
     CORSMiddleware,
@@ -59,5 +63,8 @@ async def create_assessment(
     else:
         # Default to CV engine
         results = cv_analyzer.analyze_terrain(contents)
+        
+    # Log to audit database (Killer Hackathon Feature)
+    log_assessment(engine, results["stats"], results["safe_zones"])
         
     return AssessmentResponse(**results)

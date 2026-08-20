@@ -20,8 +20,18 @@ class CVElevationAnalyzer:
         if img is None:
             raise ValueError("Invalid image provided")
             
+        # --- ADVERSARIAL ROBUSTNESS CHECK ---
+        # Hackathon killer feature: Ensure the data is actual telemetry
+        if img.shape[0] < 100 or img.shape[1] < 100:
+            return {"stats": {"error": "Image resolution too low for safe analysis."}, "safe_zones": [], "images": {}}
+            
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         
+        # Check if image is completely pitch black or blown out white (sensor failure)
+        avg_brightness = np.mean(gray)
+        if avg_brightness < 5 or avg_brightness > 250:
+            return {"stats": {"error": "CRITICAL SENSOR FAILURE: Image brightness outside safe operating bounds."}, "safe_zones": [], "images": {}}
+            
         # 1. Detect Craters using Hough Circles
         # Apply blur to reduce noise
         blurred = cv2.medianBlur(gray, 5)
