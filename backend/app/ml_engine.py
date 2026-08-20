@@ -7,7 +7,8 @@ from typing import Dict, Any
 # 
 # Instructions for ML Teammate:
 # 1. Use the transformers pipeline to load "depth-anything/Depth-Anything-V2-Small-hf".
-# 2. Accept the raw image_bytes.
+# 2. Accept the raw image_bytes. 
+#    - IMPORTANT: Resize the image to a max width of 1600px before running inference to prevent timeouts!
 # 3. Return a dictionary that matches the AssessmentResponse schema in main.py:
 #    {
 #        "stats": {"global_roughness_index": 0.0},

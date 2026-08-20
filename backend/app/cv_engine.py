@@ -20,6 +20,16 @@ class CVElevationAnalyzer:
         if img is None:
             raise ValueError("Invalid image provided")
             
+        # --- PERFORMANCE OPTIMIZATION ---
+        # Resize image to max 1600px width to keep CPU processing fast during the 8-hour hackathon.
+        MAX_WIDTH = 1600
+        height, width = img.shape[:2]
+        if width > MAX_WIDTH:
+            scale = MAX_WIDTH / width
+            new_width = int(width * scale)
+            new_height = int(height * scale)
+            img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
+            
         # --- ADVERSARIAL ROBUSTNESS CHECK ---
         # Hackathon killer feature: Ensure the data is actual telemetry
         if img.shape[0] < 100 or img.shape[1] < 100:
