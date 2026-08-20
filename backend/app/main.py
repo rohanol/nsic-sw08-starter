@@ -20,9 +20,10 @@ init_db()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "*"],
+    # SECURE: Strict CORS policy. Removed the dangerous "*" wildcard.
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST"], # Only allow specific methods
     allow_headers=["*"],
 )
 
@@ -50,8 +51,21 @@ async def create_assessment(
     Process an uploaded terrain image.
     engine: 'cv' for OpenCV classical math, 'ml' for Depth Anything V2 ML model.
     """
+    
+    # --- SECURITY CONTROL: FILE VALIDATION ---
+    # 1. Validate MIME type (prevent malicious non-image payloads)
+    allowed_types = ["image/jpeg", "image/png", "image/webp"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(status_code=415, detail="Unsupported Media Type. Only JPG, PNG, and WEBP are allowed.")
+        
     contents = await file.read()
     
+    # 2. Prevent Memory Exhaustion (DoS attack vector)
+    # Reject files larger than 10MB
+    MAX_FILE_SIZE = 10 * 1024 * 1024 
+    if len(contents) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="Payload Too Large. Max image size is 10MB.")
+        
     if engine == "ml":
         # The AI teammate will implement ml_analyzer.analyze_terrain(contents)
         try:
