@@ -1,8 +1,10 @@
 from typing import Any, Optional
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Security
+from fastapi.security import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
+import time
 from pydantic import BaseModel
 
 from app.cv_engine import CVElevationAnalyzer
@@ -11,9 +13,32 @@ from app.database import init_db, log_assessment, get_audit_history
 
 app = FastAPI(
     title="AegisLanding API with Dual Engines",
-    version="0.3.0",
+    version="0.4.0",
     description="Backend API for NSIC SW08 AI-Based Landing Risk Assessment.",
 )
+
+# --- SECURITY: API KEY AUTHENTICATION ---
+API_KEY_NAME = "X-Mission-Control-Key"
+API_KEY = "aegis-hackathon-2026-secure-key"
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+
+def get_api_key(api_key: str = Security(api_key_header)):
+    if api_key != API_KEY:
+        raise HTTPException(status_code=403, detail="Forbidden: Invalid or missing API Key")
+    return api_key
+
+# --- SECURITY: IN-MEMORY RATE LIMITING ---
+# Extremely simple rate limiter for the hackathon prototype
+ip_request_times = {}
+RATE_LIMIT_SECONDS = 2 
+
+def check_rate_limit(client_ip: str = "default"):
+    current_time = time.time()
+    if client_ip in ip_request_times:
+        time_passed = current_time - ip_request_times[client_ip]
+        if time_passed < RATE_LIMIT_SECONDS:
+            raise HTTPException(status_code=429, detail="Too Many Requests. Please wait before submitting another image.")
+    ip_request_times[client_ip] = current_time
 
 # Initialize audit database
 init_db()
@@ -42,7 +67,7 @@ def health() -> dict[str, Any]:
         "service": "aegislanding-api"
     }
 
-@app.post("/api/v1/assessments", response_model=AssessmentResponse)
+@app.post("/api/v1/assessments", response_model=AssessmentResponse, dependencies=[Depends(get_api_key)])
 async def create_assessment(
     file: UploadFile = File(...),
     engine: str = Form("cv")
@@ -52,6 +77,13 @@ async def create_assessment(
     engine: 'cv' for OpenCV classical math, 'ml' for Depth Anything V2 ML model.
     """
     
+    # --- SECURITY CONTROL: RATE LIMITING ---
+    check_rate_limit()
+    
+    # --- SECURITY CONTROL: STRICT INPUT VALIDATION ---
+    if engine not in ["cv", "ml"]:
+        raise HTTPException(status_code=422, detail="Unprocessable Entity: Engine must be 'cv' or 'ml'.")
+        
     # --- SECURITY CONTROL: FILE VALIDATION ---
     # 1. Validate MIME type (prevent malicious non-image payloads)
     allowed_types = ["image/jpeg", "image/png", "image/webp"]
@@ -87,7 +119,7 @@ async def create_assessment(
         
     return AssessmentResponse(**results)
 
-@app.get("/api/v1/assessments/history")
+@app.get("/api/v1/assessments/history", dependencies=[Depends(get_api_key)])
 def get_assessment_history(limit: int = 10):
     """
     Fetch the mission telemetry audit logs. 
