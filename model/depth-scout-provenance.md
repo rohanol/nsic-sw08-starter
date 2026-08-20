@@ -12,13 +12,13 @@
 | Model source | [Official Hugging Face model card](https://huggingface.co/depth-anything/Depth-Anything-V2-Small-hf) |
 | Original project | [Depth Anything V2 official repository](https://github.com/DepthAnything/Depth-Anything-V2) |
 | App source license | MIT, as included in the archive |
-| Archive checksum (SHA-256) | `6a75c853d9cb467c35e6aee4e35b13245cf7da99b3b5e2f0a009a63198058524` |
+| Archive checksum (SHA-256) | `cf03a9eaae371f914d28e6b3e3cb2b4c69e0ecfd0279105004622242558cd80a` |
 
 ## Required boundary
 
 > The public checkpoint output is a relative-depth visualization. It is **not** a Mars-calibrated measurement of elevation, distance, slope, terrain class, obstacle likelihood, landing risk, or landing safety. The prototype must not be represented as flight-certified software.
 
-The application uses the unmodified public Small checkpoint locally. It does not train or fine-tune it. Its `BackendDepthClient` and `API_CONTRACT.md` document how a future backend can expose the same `POST /v1/relative-depth` interface without changing the frontend display layer. The archive also includes `INTEGRATION_AEGISLANDING.md`, `requirements-backend.txt`, and the drop-in ML-engine module for the target repository’s existing `POST /api/v1/assessments` flow.
+The application uses the unmodified public Small checkpoint locally. It does not train or fine-tune it. Its `BackendDepthClient` and `API_CONTRACT.md` document how a future backend can expose the same `POST /v1/relative-depth` interface without changing the frontend display layer. The archive also includes `INTEGRATION_AEGISLANDING.md`, a concrete authenticated multipart smoke test for the target repository’s `POST /api/v1/assessments` route, fully version-locked CPU inference dependencies, and the drop-in ML-engine module for that existing flow.
 
 ## NSIC note
 
