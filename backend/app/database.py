@@ -48,3 +48,17 @@ def log_assessment(engine: str, stats: dict, safe_zones: list):
         conn.close()
     except Exception as e:
         print(f"Failed to log telemetry: {e}")
+
+def get_audit_history(limit: int = 10) -> list[dict]:
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute('SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT ?', (limit,))
+        rows = c.fetchall()
+        conn.close()
+        
+        return [dict(row) for row in rows]
+    except Exception as e:
+        print(f"Failed to fetch telemetry history: {e}")
+        return []

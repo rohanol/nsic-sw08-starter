@@ -83,6 +83,12 @@ class CVElevationAnalyzer:
         # Start with a base risk map (0-100)
         risk_map = np.zeros((img.shape[0], img.shape[1]), dtype=np.float32)
         
+        # --- NEW CV HEURISTIC: SHADOW DETECTION ---
+        # Very dark areas (< 20 intensity) are likely deep craters or steep cliffs.
+        # We assign a high risk to these unknown shadowed regions.
+        shadow_mask = np.uint8(gray < 20)
+        risk_map[shadow_mask == 1] = np.maximum(risk_map[shadow_mask == 1], 85)
+        
         # Add risk for craters (high risk inside and near rim)
         if circles is not None:
             for c in crater_data:
@@ -135,6 +141,10 @@ class CVElevationAnalyzer:
             for c in crater_data:
                 cv2.circle(annotated_img, (c['x'], c['y']), c['radius'], (0, 165, 255), 2) # Orange
                 
+        # Draw Shadows (Blue highlight)
+        shadow_contours, _ = cv2.findContours(shadow_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(annotated_img, shadow_contours, -1, (255, 0, 0), 1)
+                
         # Draw Rocks
         for r in rock_data:
             cv2.circle(annotated_img, (r['x'], r['y']), 3, (0, 0, 255), -1) # Red
@@ -157,6 +167,7 @@ class CVElevationAnalyzer:
             "stats": {
                 "craters_detected": len(crater_data),
                 "rocks_detected": len(rock_data),
+                "shadowed_regions": len(shadow_contours),
                 "global_roughness_index": round(roughness_map, 2)
             },
             "safe_zones": safe_zones,
