@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { AlertTriangle, Crosshair, Gauge, ShieldCheck, Satellite } from "lucide-react";
 
 const zones = [
@@ -85,7 +86,7 @@ function App() {
   );
 }
 
-function Metric({ icon, label, value, tone }: { icon: React.ReactNode; label: string; value: string; tone: string }) {
+function Metric({ icon, label, value, tone }: { icon: ReactNode; label: string; value: string; tone: string }) {
   return <div className={`metric-card tone-${tone}`}><span className="metric-icon">{icon}</span><div><span className="metric-label">{label}</span><strong>{value}</strong></div></div>;
 }
 
