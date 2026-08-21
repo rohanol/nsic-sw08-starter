@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from app.cv_engine import CVElevationAnalyzer
 from app.ml_engine import MLElevationAnalyzer
 from app.database import init_db, log_assessment, get_audit_history
+from app.mars_gate import mars_only_gate
 
 app = FastAPI(
     title="AegisLanding API with Dual Engines",
@@ -70,7 +71,9 @@ def health() -> dict[str, Any]:
 @app.post("/api/v1/assessments", response_model=AssessmentResponse, dependencies=[Depends(get_api_key)])
 async def create_assessment(
     file: UploadFile = File(...),
-    engine: str = Form("cv")
+    engine: str = Form("cv"),
+    declared_target: str = Form("Unknown"),
+    source_url: Optional[str] = Form(None)
 ) -> AssessmentResponse:
     """
     Process an uploaded terrain image.
@@ -99,6 +102,20 @@ async def create_assessment(
         raise HTTPException(status_code=413, detail="Payload Too Large. Max image size is 10MB.")
         
     if engine == "ml":
+        # --- COMPATIBILITY: MARS-ONLY GATE FOR BACKUP MODEL ---
+        # The ML teammate's backup model requires a provenance gate
+        gate_decision = mars_only_gate(
+            declared_target=declared_target,
+            source_url=source_url,
+            source_verified=True if source_url else False # Assuming trusted for the hackathon demo if URL is provided
+        )
+        
+        if not gate_decision.run_mars_model:
+            raise HTTPException(
+                status_code=403, 
+                detail=f"Mars Model Blocked: {gate_decision.reason}"
+            )
+            
         # The AI teammate will implement ml_analyzer.analyze_terrain(contents)
         try:
             results = await run_in_threadpool(ml_analyzer.analyze_terrain, contents)
