@@ -1,111 +1,62 @@
-# AegisLanding — NSIC SW08 Starter
+<div align="center">
+  <img src="https://img.icons8.com/?size=100&id=t79gB3yC64l4&format=png&color=000000" alt="Space Logo" width="100"/>
+  <h1>🚀 AegisLanding</h1>
+  <p><strong>Dual-Engine Planetary Landing Risk Assessment System</strong></p>
+  
+  <p>
+    <img src="https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi" alt="FastAPI"/>
+    <img src="https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" alt="React"/>
+    <img src="https://img.shields.io/badge/OpenCV-5C3EE8?style=for-the-badge&logo=opencv&logoColor=white" alt="OpenCV"/>
+    <img src="https://img.shields.io/badge/PyTorch-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white" alt="PyTorch"/>
+    <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker"/>
+  </p>
+</div>
 
-A clean starter repository for the **National Space Innovation Challenge (NSIC) — SW08: AI-Based Landing Risk Assessment**.
+---
 
-> This repository is an original development scaffold, not a completed hackathon solution. The team should implement and validate its own model, data pipeline, risk logic, and interface during the event in accordance with the NSIC rulebook.
+## 🌌 Overview
+AegisLanding is an edge-compute hazard detection system designed for autonomous spacecraft. When approaching a planetary body (like Mars), the lander captures overhead imagery and instantly calculates the safest landing zones by analyzing craters, rocks, and surface roughness.
 
-## Problem scope
+Built for the **NSIC SW08 Hackathon**, this project features a revolutionary **Dual-Engine Architecture** combining classical mathematical models with state-of-the-art Neural Networks.
 
-Build a decision-support system that analyzes planetary terrain and environmental hazards, calculates landing-risk scores, and recommends safer landing zones. The prototype should be able to explain the factors behind each recommendation.
+## ✨ Core Features
+- 🧠 **Dual-Engine Compute:** Choose between the hyper-fast OpenCV classical math engine, or the cutting-edge `Depth Anything V2` Machine Learning engine.
+- 🛡️ **Aerospace Redundancy:** If the primary ML sensor crashes or fails during descent, the backend automatically intercepts the failure and falls back to the classical CV engine, saving the mission.
+- 🔒 **Cryptographic Telemetry:** Every mission assessment is verified with an unforgeable SHA-256 cryptographic signature to prevent Man-in-the-Middle (MitM) data tampering.
+- 🛑 **Adversarial Anti-Spoofing:** Built-in high-frequency Laplacian variance scanners detect and reject synthetic or adversarial payloads designed to fool neural networks.
+- 📊 **Real-Time Dashboards:** A fully responsive React interface providing visual heatmaps, risk metrics, and annotated safe zones.
 
-The initial scaffold separates the project into a frontend dashboard, a small backend API, model and data workspaces, tests, documentation, and presentation deliverables.
-
-## Repository layout
-
-```text
-.
-├── backend/                 # FastAPI service and API tests
-│   ├── app/
-│   │   └── main.py
-│   ├── tests/
-│   │   └── test_health.py
-│   └── requirements.txt
-├── data/                    # Dataset documentation and local-only data files
-├── docs/                    # Scope, architecture, threat model, and judging notes
-├── frontend/                # Vite + React + TypeScript dashboard scaffold
-│   ├── src/
-│   │   ├── App.tsx
-│   │   ├── main.tsx
-│   │   └── styles.css
-│   ├── index.html
-│   ├── package.json
-│   └── tsconfig.json
-├── model/                   # Model contract and feature-design workspace
-├── notebooks/               # Exploratory analysis notebooks; keep large outputs out of Git
-├── .env.example
-├── .gitignore
-└── README.md
-```
-
-## Local setup
-
-### Backend
+## 🐳 Quickstart (Docker)
+The backend is completely containerized for production deployment.
 
 ```bash
-cd backend
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+# Clone the repository
+git clone https://github.com/rohanol/nsic-sw08-starter.git
+cd nsic-sw08-starter
+
+# Boot up the backend API using Docker Compose
+docker-compose up -d --build
 ```
+*The backend API will now be live on `http://localhost:8000`*
 
-The API will be available at `http://localhost:8000`. Health check: `http://localhost:8000/health`. API documentation: `http://localhost:8000/docs`.
-
-### Frontend
+## 💻 Local Development
+If you prefer not to use Docker, you can run the entire stack locally using our quick-launch script:
 
 ```bash
-cd frontend
-npm install
-npm run dev
+# Windows
+Double-click launch_hackathon.bat
 ```
 
-The frontend expects the API at `http://localhost:8000` by default. Set `VITE_API_BASE_URL` if the backend runs elsewhere.
+This will automatically install `npm` and `pip` dependencies and boot both the React Frontend (Port 5173) and the FastAPI Backend (Port 8000).
 
-## Suggested implementation order during the hackathon
-
-1. Agree on the terrain representation and the smallest demonstrable landing scenario.
-2. Add a reproducible data-loading path and document every external dataset and license.
-3. Implement hazard features and a baseline risk score before attempting a more advanced model.
-4. Add a safe-zone recommendation endpoint with confidence and explanation fields.
-5. Connect the dashboard to the API and show the map, hazard layers, scores, and recommendation rationale.
-6. Add adversarial-input tests, input validation, audit logging, and a deterministic offline demo path.
-7. Rehearse the live demonstration and keep a backup dataset and local build.
-
-## API contract target
-
-The planned assessment response should expose the following concepts:
-
-```json
-{
-  "assessment_id": "demo-001",
-  "candidate_zones": [],
-  "recommended_zone_id": null,
-  "overall_confidence": null,
-  "explanations": [],
-  "data_quality": {},
-  "model_version": "unimplemented"
-}
+## 🛰️ API Security Protocol
+All API requests require the Mission Control Authorization Header:
+```http
+X-Mission-Control-Key: aegis-hackathon-2026-secure-key
 ```
 
-The exact schema may change as the team learns more about the selected data and model. Keep the backend contract stable enough that the frontend can be developed independently.
-
-## Security and originality checklist
-
-Use AI coding assistants only as development aids, and review every generated change. Do not copy a complete existing solution or repository. Keep the Git history, attribute open-source dependencies, and ensure every team member can explain the submitted code.
-
-For a cybersecurity angle, treat terrain and sensor inputs as untrusted. Validate ranges and formats, detect missing or stale data, record model and dataset versions, and make the recommendation explainable. Do not present the prototype as flight-certified software.
-
-## Team collaboration
-
-Use short branches such as `feature/data-contract`, `feature/risk-baseline`, and `feature/dashboard`. Open pull requests for meaningful changes, keep commits small, and run backend tests before merging. Put secrets only in local `.env` files; never commit API keys or personal credentials.
-
-## NSIC reference
-
-- Problem code: `SW08`
-- Event: National Space Innovation Challenge
-- Official event page: https://spaceaxpo.axsx.in/events/nsic
-- Official rulebook: https://spaceaxpo.axsx.in/documents/NSIC_Rulebook.pdf
-
-## License
-
-This starter scaffold is provided for the participating team to extend. Add a project license only after the team agrees on the intended terms and checks compatibility with every external dataset and dependency used.
+## 🤝 The Team
+Built with blood, sweat, and code in under 8 hours.
+* **Backend & Security Lead:** Orchestrated the FastAPI server, Dockerization, Aerospace Redundancy, and Cryptographic integrations.
+* **Frontend Lead:** Engineered the stunning interactive React UI and real-time visualization dashboards.
+* **ML Lead:** Packaged and implemented the HuggingFace `Depth Anything V2` models in an offline-capable cleanroom environment.
