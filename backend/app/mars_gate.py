@@ -63,15 +63,23 @@ def mars_only_gate(
     target = declared_target.strip().casefold()
 
     if target != "mars":
-        pass # HACKATHON BYPASS: Ignore the target string
+        return GateDecision(
+            status="blocked",
+            run_mars_model=False,
+            run_visual_complexity=True,
+            reason=(
+                "The uploaded image is not declared as Mars. The Mars-trained "
+                "model was skipped. Generic visual-complexity analysis may still run."
+            ),
+        )
 
-    # HACKATHON BYPASS: Always allow the ML model to run for demonstration purposes
-    return GateDecision(
-        status="accepted",
-        run_mars_model=True,
-        run_visual_complexity=True,
-        reason="Hackathon Demo Override: Mars declaration accepted without provenance check.",
-    )
+    if is_trusted_mars_source(source_url) and source_verified:
+        return GateDecision(
+            status="accepted",
+            run_mars_model=True,
+            run_visual_complexity=True,
+            reason="Mars declaration and backend-verified trusted Mars source accepted.",
+        )
 
     return GateDecision(
         status="unknown",
