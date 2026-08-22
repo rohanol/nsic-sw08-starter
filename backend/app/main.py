@@ -8,8 +8,9 @@ import base64
 import os
 import time
 import hashlib
-from urllib.error import URLError
-from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 import cv2
 import numpy as np
 from pydantic import BaseModel
@@ -40,11 +41,14 @@ async def add_process_time_header(request, call_next):
 
 # --- SECURITY: API KEY AUTHENTICATION ---
 API_KEY_NAME = "X-Mission-Control-Key"
-API_KEY = "aegis-hackathon-2026-secure-key"
+MISSION_CONTROL_KEY = os.getenv("MISSION_CONTROL_KEY", "").strip()
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+if not MISSION_CONTROL_KEY:
+    raise RuntimeError("MISSION_CONTROL_KEY must be set before the FastAPI service can start.")
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
 def get_api_key(api_key: str = Security(api_key_header)):
-    if api_key != API_KEY:
+    if api_key != MISSION_CONTROL_KEY:
         raise HTTPException(status_code=403, detail="Forbidden: Invalid or missing API Key")
     return api_key
 
@@ -64,11 +68,16 @@ def check_rate_limit(client_ip: str = "default"):
 # Initialize audit database
 init_db()
 
+allowed_origins = [origin.strip() for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if origin.strip()]
+if not allowed_origins and APP_ENV == "development":
+    allowed_origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
+if not allowed_origins:
+    raise RuntimeError("CORS_ALLOWED_ORIGINS must contain at least one origin outside development.")
+
 app.add_middleware(
     CORSMiddleware,
-    # TEMPORARY ALLOW-ALL FOR TUNNEL TESTING
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=allowed_origins,
+    allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"], 
     allow_headers=["*"],
 )
@@ -95,16 +104,45 @@ def to_data_uri(encoded_png: str | None) -> Optional[str]:
     return f"data:image/png;base64,{encoded_png}"
 
 
+def _is_safe_trusted_source(source_url: str | None) -> bool:
+    if not source_url or not is_trusted_mars_source(source_url):
+        return False
+    parsed = urlparse(source_url)
+    return parsed.scheme == "https" and not parsed.username and not parsed.password and bool(parsed.hostname)
+
+
+class TrustedSourceRedirectHandler(HTTPRedirectHandler):
+    """Follow only HTTPS redirects that remain on the configured trusted-source allowlist."""
+
+    def redirect_request(self, request, fp, code, msg, headers, new_url):
+        if not _is_safe_trusted_source(new_url):
+            raise URLError("Trusted source redirected outside the approved HTTPS allowlist.")
+        return super().redirect_request(request, fp, code, msg, headers, new_url)
+
+
 def verify_trusted_source(source_url: str | None, uploaded_bytes: bytes) -> bool:
     """Verify bytes against an approved source URL before permitting the Mars model."""
-    if not is_trusted_mars_source(source_url):
+    if not _is_safe_trusted_source(source_url):
         return False
+    timeout_seconds = float(os.getenv("TRUSTED_SOURCE_TIMEOUT_SECONDS", "8"))
+    max_bytes = int(os.getenv("TRUSTED_SOURCE_MAX_BYTES", str(10 * 1024 * 1024)))
+    if timeout_seconds <= 0 or timeout_seconds > 30 or max_bytes < 1024 or max_bytes > 20 * 1024 * 1024:
+        raise ValueError("Trusted-source limits are outside their permitted deployment bounds.")
     try:
-        request = Request(source_url, headers={"User-Agent": "AegisLanding/1.0 source-verifier"})
-        with urlopen(request, timeout=7) as response:
-            canonical_bytes = response.read(10 * 1024 * 1024 + 1)
-        return len(canonical_bytes) <= 10 * 1024 * 1024 and exact_source_match(uploaded_bytes, canonical_bytes)
-    except (URLError, ValueError, OSError):
+        request = Request(source_url, headers={"Accept": "image/jpeg,image/png,image/webp", "User-Agent": "AegisLanding/1.0 source-verifier"})
+        opener = build_opener(TrustedSourceRedirectHandler())
+        with opener.open(request, timeout=timeout_seconds) as response:
+            if not _is_safe_trusted_source(response.geturl()):
+                return False
+            content_length = response.headers.get("Content-Length")
+            if content_length and int(content_length) > max_bytes:
+                return False
+            content_type = response.headers.get_content_type()
+            if content_type not in {"image/jpeg", "image/png", "image/webp"}:
+                return False
+            canonical_bytes = response.read(max_bytes + 1)
+        return len(canonical_bytes) <= max_bytes and exact_source_match(uploaded_bytes, canonical_bytes)
+    except (HTTPError, URLError, ValueError, OSError):
         return False
 
 

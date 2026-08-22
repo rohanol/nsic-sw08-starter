@@ -16,9 +16,16 @@ class AnalysisServiceError(RuntimeError):
 
 
 class AnalysisServiceClient:
-    def __init__(self, base_url: str | None = None, timeout_seconds: float = 35.0):
+    def __init__(self, base_url: str | None = None, token: str | None = None):
         self.base_url = (base_url or os.getenv("ANALYSIS_SERVICE_URL", "http://localhost:8090")).rstrip("/")
-        self.timeout_seconds = timeout_seconds
+        self.token = (token or os.getenv("ANALYSIS_SERVICE_TOKEN", "")).strip()
+        if not self.token:
+            raise RuntimeError("ANALYSIS_SERVICE_TOKEN must be set before the backend can call the independent model service.")
+        connect_timeout = float(os.getenv("ANALYSIS_SERVICE_CONNECT_TIMEOUT_SECONDS", "5"))
+        read_timeout = float(os.getenv("ANALYSIS_SERVICE_READ_TIMEOUT_SECONDS", "90"))
+        if connect_timeout <= 0 or connect_timeout > 30 or read_timeout <= 0 or read_timeout > 180:
+            raise RuntimeError("Analysis-service timeouts are outside their permitted deployment bounds.")
+        self.timeout = httpx.Timeout(connect=connect_timeout, read=read_timeout, write=read_timeout, pool=connect_timeout)
 
     def analyze(self, filename: str, image_bytes: bytes, mode: str, columns: int = 6, rows: int = 4) -> dict[str, Any]:
         payload = {
@@ -28,7 +35,12 @@ class AnalysisServiceClient:
             "options": {"columns": columns, "rows": rows},
         }
         try:
-            response = httpx.post(f"{self.base_url}/analyze", json=payload, timeout=self.timeout_seconds)
+            response = httpx.post(
+                f"{self.base_url}/analyze",
+                json=payload,
+                headers={"X-Analysis-Service-Token": self.token},
+                timeout=self.timeout,
+            )
         except httpx.HTTPError as exc:
             raise AnalysisServiceError(f"Independent analysis service is unavailable: {exc}") from exc
 

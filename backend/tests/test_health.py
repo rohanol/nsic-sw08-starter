@@ -1,3 +1,8 @@
+import os
+
+os.environ.setdefault("MISSION_CONTROL_KEY", "test-mission-control-key")
+os.environ.setdefault("ANALYSIS_SERVICE_TOKEN", "test-analysis-service-token")
+
 import cv2
 import numpy as np
 from fastapi.testclient import TestClient
@@ -6,7 +11,7 @@ from app import main
 
 
 client = TestClient(main.app)
-HEADERS = {"X-Mission-Control-Key": "aegis-hackathon-2026-secure-key"}
+HEADERS = {"X-Mission-Control-Key": main.MISSION_CONTROL_KEY}
 
 
 def make_test_image() -> bytes:
@@ -62,3 +67,8 @@ def test_assessment_requires_mission_key() -> None:
         files={"file": ("terrain.png", make_test_image(), "image/png")},
     )
     assert response.status_code == 403
+
+
+def test_trusted_source_verification_rejects_insecure_or_untrusted_urls() -> None:
+    assert main.verify_trusted_source("http://mars.nasa.gov/example.jpg", b"image") is False
+    assert main.verify_trusted_source("https://example.invalid/terrain.jpg", b"image") is False

@@ -6,10 +6,12 @@ services:
       context: .
       dockerfile: ./analysis-service/Dockerfile
     container_name: aegislanding-analysis-tools
-    ports:
-      - "8090:8090"
+    env_file: .env
+    expose:
+      - "8090"
     environment:
       - PORT=8090
+      - ANALYSIS_SERVICE_TOKEN=${ANALYSIS_SERVICE_TOKEN:?ANALYSIS_SERVICE_TOKEN must be set}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:8090/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 10s
@@ -21,15 +23,35 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: aegislanding-backend
-    ports:
-      - "8000:8000"
+    env_file: .env
+    expose:
+      - "8000"
     environment:
       - PYTHONUNBUFFERED=1
       - ANALYSIS_SERVICE_URL=http://analysis-service:8090
-    volumes:
-      # Mount the backend folder for live-reloading during development
-      - ./backend:/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      - MISSION_CONTROL_KEY=${MISSION_CONTROL_KEY:?MISSION_CONTROL_KEY must be set}
+      - ANALYSIS_SERVICE_TOKEN=${ANALYSIS_SERVICE_TOKEN:?ANALYSIS_SERVICE_TOKEN must be set}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:?CORS_ALLOWED_ORIGINS must be set}
     depends_on:
       analysis-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  frontend:
+    build:
+      context: .
+      dockerfile: ./frontend/Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+    container_name: aegislanding-frontend
+    ports:
+      - "8080:80"
+    environment:
+      - MISSION_CONTROL_KEY=${MISSION_CONTROL_KEY:?MISSION_CONTROL_KEY must be set}
+    depends_on:
+      backend:
         condition: service_healthy

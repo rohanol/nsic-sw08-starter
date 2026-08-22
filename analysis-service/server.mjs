@@ -7,7 +7,19 @@ import { analyzeVisualComplexity } from "../analysis-tools/dist/modules/vision.j
 const modelRequire = createRequire(new URL("../analysis-tools/package.json", import.meta.url));
 const sharp = modelRequire("sharp");
 const port = Number(process.env.PORT ?? 8090);
-const maxPayloadBytes = 14 * 1024 * 1024;
+const maxPayloadBytes = Number(process.env.ANALYSIS_SERVICE_MAX_PAYLOAD_BYTES ?? 14 * 1024 * 1024);
+const serviceToken = String(process.env.ANALYSIS_SERVICE_TOKEN ?? "").trim();
+
+if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("PORT must be a valid TCP port.");
+if (!Number.isInteger(maxPayloadBytes) || maxPayloadBytes < 1024 || maxPayloadBytes > 24 * 1024 * 1024) throw new Error("ANALYSIS_SERVICE_MAX_PAYLOAD_BYTES is outside allowed bounds.");
+if (!serviceToken) throw new Error("ANALYSIS_SERVICE_TOKEN must be set before the sidecar can start.");
+
+function isAuthorized(request) {
+  const supplied = String(request.headers["x-analysis-service-token"] ?? "");
+  const left = Buffer.from(supplied);
+  const right = Buffer.from(serviceToken);
+  return left.length === right.length && crypto.timingSafeEqual(left, right);
+}
 
 function sendJson(response, status, payload) {
   response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
@@ -58,6 +70,7 @@ const server = http.createServer(async (request, response) => {
   if (request.method !== "POST" || request.url !== "/analyze") {
     return sendJson(response, 404, { detail: "Not found" });
   }
+  if (!isAuthorized(request)) return sendJson(response, 403, { detail: "Forbidden" });
 
   try {
     const payload = await readJson(request);

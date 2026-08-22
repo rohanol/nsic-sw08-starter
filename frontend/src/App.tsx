@@ -29,8 +29,8 @@ import {
   X,
 } from "lucide-react";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
-const API_KEY = import.meta.env.VITE_API_KEY ?? "aegis-hackathon-2026-secure-key";
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.PROD ? "/api" : "http://localhost:8000")).replace(/\/$/, "");
+const API_KEY = import.meta.env.VITE_API_KEY ?? "";
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
 type Engine = "cv" | "ml";
@@ -138,7 +138,7 @@ function App() {
     setIsRunning(true); setNotice(null);
     try {
       const body = new FormData(); body.append("file", file); body.append("engine", engine); body.append("declared_target", declaredTarget); if (sourceUrl.trim()) body.append("source_url", sourceUrl.trim());
-      const response = await fetch(`${API_BASE_URL}/api/v1/assessments`, { method: "POST", headers: { "X-Mission-Control-Key": API_KEY }, body });
+      const response = await fetch(`${API_BASE_URL}/api/v1/assessments`, { method: "POST", headers: API_KEY ? { "X-Mission-Control-Key": API_KEY } : {}, body });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.detail ?? "The terrain assessment failed.");
       const normalized = normalizeAssessment(data, engine);
@@ -217,6 +217,6 @@ function imageUri(value: unknown): string | undefined {
   return `data:image/png;base64,${value}`;
 }
 function normalizeRisk(value: number) { return value > 1 ? Math.min(1, value / 100) : Math.max(0, Math.min(1, value)); }
-async function loadHistory(setHistory: (items: HistoryItem[]) => void, setLoading: (value: boolean) => void) { setLoading(true); try { const response = await fetch(`${API_BASE_URL}/api/v1/assessments/history?limit=5`, { headers: { "X-Mission-Control-Key": API_KEY } }); if (response.ok) { const data = await response.json(); setHistory(data.history ?? []); } } catch { /* Offline mode is supported. */ } finally { setLoading(false); } }
+async function loadHistory(setHistory: (items: HistoryItem[]) => void, setLoading: (value: boolean) => void) { setLoading(true); try { const response = await fetch(`${API_BASE_URL}/api/v1/assessments/history?limit=5`, { headers: API_KEY ? { "X-Mission-Control-Key": API_KEY } : {} }); if (response.ok) { const data = await response.json(); setHistory(data.history ?? []); } } catch { /* Offline mode is supported. */ } finally { setLoading(false); } }
 
 export default App;
