@@ -6,7 +6,7 @@ RUN corepack enable
 ENV ONNXRUNTIME_NODE_INSTALL=skip
 
 COPY analysis-tools/package.json analysis-tools/pnpm-lock.yaml /app/analysis-tools/
-RUN pnpm --dir /app/analysis-tools install --frozen-lockfile
+RUN pnpm --dir /app/analysis-tools install --frozen-lockfile --ignore-scripts
 
 COPY analysis-tools /app/analysis-tools
 RUN pnpm --dir /app/analysis-tools build
