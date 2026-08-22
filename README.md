@@ -27,17 +27,28 @@ Built for the **NSIC SW08 Hackathon**, this project features a revolutionary **D
 - 📊 **Real-Time Dashboards:** A fully responsive React interface providing visual heatmaps, risk metrics, and annotated safe zones.
 
 ## 🐳 Quickstart (Docker)
-The backend is completely containerized for production deployment.
+The stack runs the FastAPI application alongside the independent Node/ONNX analysis sidecar. The sidecar is built from the pinned `analysis-tools-for-22` submodule; it is not copied or modified inside this repository.
 
 ```bash
 # Clone the repository
 git clone https://github.com/rohanol/nsic-sw08-starter.git
 cd nsic-sw08-starter
+git submodule update --init --recursive
 
 # Boot up the backend API using Docker Compose
 docker-compose up -d --build
 ```
-*The backend API will now be live on `http://localhost:8000`*
+*The backend API will now be live on `http://localhost:8000`, while the internal terrain-analysis sidecar listens on `http://localhost:8090` for development diagnostics.*
+
+## 🧩 Independent Model Integration
+
+The `analysis-tools` git submodule supplies the trained MobileNetV3–U-Net ONNX segmentation model and TERRAIN LENS visual-complexity analysis. FastAPI remains responsible for authentication, file validation, Mars-provenance policy, safe-zone recommendations, and auditing. A verified Mars source runs semantic segmentation plus visual complexity; unverified or non-Mars imagery receives visual-complexity evidence without invoking the Mars-trained model. See [`docs/model-service-integration.md`](docs/model-service-integration.md) for the complete boundary and local workflow.
+
+For local development on macOS or Linux, run:
+
+```bash
+./scripts/run_local.sh
+```
 
 ## 💻 Local Development
 If you prefer not to use Docker, you can run the entire stack locally using our quick-launch script:

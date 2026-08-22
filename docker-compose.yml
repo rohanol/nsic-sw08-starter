@@ -1,6 +1,21 @@
 version: '3.8'
 
 services:
+  analysis-service:
+    build:
+      context: .
+      dockerfile: ./analysis-service/Dockerfile
+    container_name: aegislanding-analysis-tools
+    ports:
+      - "8090:8090"
+    environment:
+      - PORT=8090
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8090/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   backend:
     build:
       context: ./backend
@@ -10,7 +25,11 @@ services:
       - "8000:8000"
     environment:
       - PYTHONUNBUFFERED=1
+      - ANALYSIS_SERVICE_URL=http://analysis-service:8090
     volumes:
       # Mount the backend folder for live-reloading during development
       - ./backend:/app
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    depends_on:
+      analysis-service:
+        condition: service_healthy

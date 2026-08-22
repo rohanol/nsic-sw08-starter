@@ -4,18 +4,22 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Sec
 from fastapi.security import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
+import base64
+import os
 import time
 import hashlib
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 import cv2
 import numpy as np
 from pydantic import BaseModel
 
 from app.cv_engine import CVElevationAnalyzer
-from app.ml_engine import MLElevationAnalyzer
 from app.database import init_db, log_assessment, get_audit_history
-from app.mars_gate import mars_only_gate
+from app.mars_gate import exact_source_match, is_trusted_mars_source, mars_only_gate
 from app.kalman_filter import mission_tracker
 from app.ccsds_encoder import generate_ccsds_packet
+from app.model_service import AnalysisServiceClient, AnalysisServiceError
 from fastapi.responses import Response
 
 app = FastAPI(
@@ -60,13 +64,89 @@ app.add_middleware(
 )
 
 cv_analyzer = CVElevationAnalyzer(lander_size_px=30)
-ml_analyzer = MLElevationAnalyzer(lander_size_px=30)
+analysis_client = AnalysisServiceClient()
 
 class AssessmentResponse(BaseModel):
     stats: dict[str, Any]
     safe_zones: list[dict[str, Any]]
     images: dict[str, str]
     fallback_triggered: Optional[bool] = False
+    analysisId: Optional[str] = None
+    engine_used: Optional[str] = None
+    source: Optional[dict[str, Any]] = None
+    model: Optional[dict[str, Any]] = None
+    visualComplexity: Optional[dict[str, Any]] = None
+    limitations: list[str] = []
+
+
+def to_data_uri(encoded_png: str | None) -> Optional[str]:
+    if not encoded_png:
+        return None
+    return f"data:image/png;base64,{encoded_png}"
+
+
+def verify_trusted_source(source_url: str | None, uploaded_bytes: bytes) -> bool:
+    """Verify bytes against an approved source URL before permitting the Mars model."""
+    if not is_trusted_mars_source(source_url):
+        return False
+    try:
+        request = Request(source_url, headers={"User-Agent": "AegisLanding/1.0 source-verifier"})
+        with urlopen(request, timeout=7) as response:
+            canonical_bytes = response.read(10 * 1024 * 1024 + 1)
+        return len(canonical_bytes) <= 10 * 1024 * 1024 and exact_source_match(uploaded_bytes, canonical_bytes)
+    except (URLError, ValueError, OSError):
+        return False
+
+
+def attach_independent_evidence(
+    cv_results: dict[str, Any],
+    independent: dict[str, Any],
+    engine: str,
+    gate_reason: str,
+    model_ran: bool,
+) -> dict[str, Any]:
+    images = dict(cv_results.get("images", {}))
+    source = independent.get("source") or {}
+    source_png = to_data_uri(source.get("png"))
+    if source_png:
+        images["source"] = source_png
+
+    model = independent.get("model")
+    if model:
+        overlay = to_data_uri(model.get("overlayPng"))
+        mask = to_data_uri(model.get("maskPng"))
+        if overlay:
+            images["modelOverlay"] = overlay
+        if mask:
+            images["mask"] = mask
+
+    visual = independent.get("visualComplexity") or {}
+    for output_key, response_key in (("overlayPng", "complexityOverlay"), ("edgeMapPng", "edgeMap"), ("textureMapPng", "textureMap")):
+        artifact = to_data_uri(visual.get(output_key))
+        if artifact:
+            images[response_key] = artifact
+
+    stats = dict(cv_results.get("stats", {}))
+    stats.update({
+        "independent_analysis": "semantic terrain + visual complexity" if model_ran else "visual complexity",
+        "mars_model_status": "accepted" if model_ran else "skipped",
+    })
+    limitations = list(independent.get("limitations", []))
+    if gate_reason:
+        limitations.insert(0, gate_reason)
+    limitations.append("OpenCV candidates are ranking aids for review; model and complexity output are evidence, not flight-control commands.")
+    return {
+        "analysisId": independent.get("analysisId"),
+        "engine_used": "ml" if model_ran and engine == "ml" else "cv+terrain-lens",
+        "stats": stats,
+        "safe_zones": cv_results.get("safe_zones", []),
+        "images": images,
+        "source": {key: source.get(key) for key in ("filename", "width", "height") if source.get(key) is not None},
+        "model": model,
+        "visualComplexity": visual,
+        "limitations": limitations,
+        "fallback_triggered": False,
+    }
 
 @app.get("/health")
 def health() -> dict[str, Any]:
@@ -121,44 +201,27 @@ async def create_assessment(
                 detail="SECURITY ALERT: Adversarial payload anomaly detected. Mission aborted to protect lander."
             )
         
-    if engine == "ml":
-        # --- COMPATIBILITY: MARS-ONLY GATE FOR BACKUP MODEL ---
-        # The ML teammate's backup model requires a provenance gate
-        gate_decision = mars_only_gate(
-            declared_target=declared_target,
-            source_url=source_url,
-            source_verified=True if source_url else False # Assuming trusted for the hackathon demo if URL is provided
-        )
-        
-        if not gate_decision.run_mars_model:
-            raise HTTPException(
-                status_code=403, 
-                detail=f"Mars Model Blocked: {gate_decision.reason}"
-            )
-            
-        try:
-            results = await run_in_threadpool(ml_analyzer.analyze_terrain, contents)
-            results["fallback_triggered"] = False
-        except Exception as e:
-            # --- AEROSPACE REDUNDANCY: AUTOMATIC FALLBACK ---
-            # If the primary ML sensor fails (e.g. out of memory, crash), 
-            # gracefully degrade to the classical CV engine instead of crashing.
-            print(f"ML Engine Failed: {e}. Falling back to CV Engine.")
-            try:
-                results = await run_in_threadpool(cv_analyzer.analyze_terrain, contents)
-                results["fallback_triggered"] = True
-                results["stats"]["ai_model"] = "Failed (Fallback to CV)"
-            except Exception as cv_e:
-                raise HTTPException(status_code=500, detail=f"ML and CV Fallback both failed: {str(cv_e)}")
-    else:
-        # Run CV engine in a threadpool to prevent blocking the async event loop
-        try:
-            results = await run_in_threadpool(cv_analyzer.analyze_terrain, contents)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"CV Engine failed: {str(e)}")
-        
-    if "error" in results.get("stats", {}):
-        raise HTTPException(status_code=400, detail=results["stats"]["error"])
+    try:
+        cv_results = await run_in_threadpool(cv_analyzer.analyze_terrain, contents)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"CV Engine failed: {str(e)}")
+
+    if "error" in cv_results.get("stats", {}):
+        raise HTTPException(status_code=400, detail=cv_results["stats"]["error"])
+
+    source_verified = await run_in_threadpool(verify_trusted_source, source_url, contents)
+    gate_decision = mars_only_gate(declared_target=declared_target, source_url=source_url, source_verified=source_verified)
+    mode = "full" if engine == "ml" and gate_decision.run_mars_model else "visual-only"
+    try:
+        independent = await run_in_threadpool(analysis_client.analyze, file.filename or "terrain-image", contents, mode)
+        results = attach_independent_evidence(cv_results, independent, engine, gate_decision.reason, mode == "full")
+    except AnalysisServiceError as error:
+        results = {
+            **cv_results,
+            "engine_used": "cv-fallback",
+            "limitations": [gate_decision.reason, str(error), "Independent evidence was unavailable; the response contains classical CV output only."],
+            "fallback_triggered": True,
+        }
         
     # --- AEROSPACE NAVIGATION: KALMAN FILTER TRACKING ---
     if results.get("safe_zones"):

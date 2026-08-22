@@ -1,23 +1,64 @@
+import cv2
+import numpy as np
 from fastapi.testclient import TestClient
 
-from backend.app.main import app
+from app import main
 
 
-client = TestClient(app)
+client = TestClient(main.app)
+HEADERS = {"X-Mission-Control-Key": "aegis-hackathon-2026-secure-key"}
+
+
+def make_test_image() -> bytes:
+    image = np.full((180, 240, 3), (105, 112, 126), dtype=np.uint8)
+    cv2.circle(image, (95, 85), 26, (65, 65, 65), -1)
+    cv2.rectangle(image, (150, 112), (164, 126), (40, 40, 40), -1)
+    ok, encoded = cv2.imencode(".png", image)
+    assert ok
+    return encoded.tobytes()
 
 
 def test_health() -> None:
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "service": "aegislanding-api"}
+    assert response.json()["status"] == "ok"
 
 
-def test_assessment_contract() -> None:
+def test_assessment_merges_independent_visual_evidence(monkeypatch) -> None:
+    main.ip_request_times.clear()
+    monkeypatch.setattr(
+        main.analysis_client,
+        "analyze",
+        lambda *_args, **_kwargs: {
+            "analysisId": "independent-test-1",
+            "source": {"filename": "terrain.png", "width": 240, "height": 180, "png": "c291cmNl"},
+            "visualComplexity": {
+                "topReviewCells": [{"rank": 1, "row": 0, "column": 2, "score": 0.91, "edgeDensity": 0.7}],
+                "overlayPng": "b3ZlcmxheQ==",
+                "edgeMapPng": "ZWRnZQ==",
+                "textureMapPng": "dGV4dHVyZQ==",
+            },
+            "limitations": ["Visual-complexity evidence only."],
+        },
+    )
     response = client.post(
         "/api/v1/assessments",
-        json={"scenario_id": "demo", "candidate_zones": []},
+        headers=HEADERS,
+        data={"engine": "cv", "declared_target": "Mars"},
+        files={"file": ("terrain.png", make_test_image(), "image/png")},
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["assessment_id"] == "demo-starter"
-    assert body["model_version"] == "unimplemented"
+    assert body["analysisId"] == "independent-test-1"
+    assert body["visualComplexity"]["topReviewCells"][0]["score"] == 0.91
+    assert body["images"]["complexityOverlay"].startswith("data:image/png;base64,")
+    assert body["safe_zones"]
+
+
+def test_assessment_requires_mission_key() -> None:
+    response = client.post(
+        "/api/v1/assessments",
+        data={"engine": "cv"},
+        files={"file": ("terrain.png", make_test_image(), "image/png")},
+    )
+    assert response.status_code == 403
