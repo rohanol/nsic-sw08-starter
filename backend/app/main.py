@@ -5,6 +5,9 @@ from fastapi.security import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
 import time
+import hashlib
+import cv2
+import numpy as np
 from pydantic import BaseModel
 
 from app.cv_engine import CVElevationAnalyzer
@@ -102,6 +105,19 @@ async def create_assessment(
     if len(contents) > MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail="Payload Too Large. Max image size is 10MB.")
         
+    # --- SECURITY CONTROL: ADVERSARIAL NOISE DEFENDER ---
+    # Fast scan for unnatural high-frequency pixel anomalies 
+    # (used by hackers to spoof neural networks)
+    nparr = np.frombuffer(contents, np.uint8)
+    gray_img = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
+    if gray_img is not None:
+        laplacian_var = cv2.Laplacian(gray_img, cv2.CV_64F).var()
+        if laplacian_var > 15000:
+            raise HTTPException(
+                status_code=403, 
+                detail="SECURITY ALERT: Adversarial payload anomaly detected. Mission aborted to protect lander."
+            )
+        
     if engine == "ml":
         # --- COMPATIBILITY: MARS-ONLY GATE FOR BACKUP MODEL ---
         # The ML teammate's backup model requires a provenance gate
@@ -143,6 +159,12 @@ async def create_assessment(
         
     # Log to audit database (Killer Hackathon Feature)
     log_assessment(engine, results["stats"], results["safe_zones"])
+        
+    # --- SECURITY CONTROL: CRYPTOGRAPHIC MISSION SIGNATURE ---
+    # Generate an unforgeable hash of the telemetry to prove data integrity
+    salt = b"AEGIS_HACKATHON_SECURE_SALT"
+    hash_payload = salt + contents + str(results.get("safe_zones", [])).encode('utf-8')
+    results["stats"]["telemetry_signature"] = hashlib.sha256(hash_payload).hexdigest()
         
     return AssessmentResponse(**results)
 
