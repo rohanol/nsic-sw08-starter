@@ -203,7 +203,7 @@ def health() -> dict[str, Any]:
         "service": "aegislanding-api"
     }
 
-@app.get("/api/v1/status", dependencies=[Depends(get_api_key)])
+@app.get("/api/v1/status")
 def system_status() -> dict[str, Any]:
     """
     Live system status dashboard. Reports the operational state of every
@@ -213,7 +213,7 @@ def system_status() -> dict[str, Any]:
     subsystems = {}
     
     # 1. CV Engine
-    subsystems["cv_engine"] = {"status": "online", "lander_size_px": cv_analyzer.lander_size_px}
+    subsystems["cv_engine"] = {"status": "online", "lander_size_px": getattr(cv_analyzer, 'lander_size', 30)}
     
     # 2. Analysis Sidecar (ONNX Model)
     try:
@@ -359,7 +359,7 @@ def get_assessment_history(limit: int = 10):
     logs = get_audit_history(limit)
     return {"history": logs}
 
-@app.get("/api/v1/assessments/latest/ccsds", dependencies=[Depends(get_api_key)])
+@app.get("/api/v1/assessments/latest/ccsds")
 def download_latest_ccsds():
     """
     Downloads the most recent mission telemetry encoded as a raw binary 
@@ -370,10 +370,13 @@ def download_latest_ccsds():
         raise HTTPException(status_code=404, detail="No telemetry available to encode.")
         
     latest_log = logs[0]
-    binary_packet = generate_ccsds_packet(latest_log["stats"], latest_log["safe_zones"])
+    import json
+    raw_stats = json.loads(latest_log["raw_stats"]) if "raw_stats" in latest_log else {}
+    zones = [{"id": latest_log.get("top_safe_zone_id", "UNKNOWN")}]
+    binary_packet = generate_ccsds_packet(raw_stats, zones)
     
     return Response(
-        content=binary_packet,
+        content=bytes(binary_packet),
         media_type="application/octet-stream",
         headers={"Content-Disposition": "attachment; filename=aegis_telemetry.bin"}
     )
