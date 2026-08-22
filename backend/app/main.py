@@ -46,10 +46,10 @@ init_db()
 
 app.add_middleware(
     CORSMiddleware,
-    # SECURE: Strict CORS policy. Removed the dangerous "*" wildcard.
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    # TEMPORARY ALLOW-ALL FOR TUNNEL TESTING
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["GET", "POST"], # Only allow specific methods
+    allow_methods=["GET", "POST", "OPTIONS"], 
     allow_headers=["*"],
 )
 
@@ -60,6 +60,7 @@ class AssessmentResponse(BaseModel):
     stats: dict[str, Any]
     safe_zones: list[dict[str, Any]]
     images: dict[str, str]
+    fallback_triggered: Optional[bool] = False
 
 @app.get("/health")
 def health() -> dict[str, Any]:
@@ -116,11 +117,20 @@ async def create_assessment(
                 detail=f"Mars Model Blocked: {gate_decision.reason}"
             )
             
-        # The AI teammate will implement ml_analyzer.analyze_terrain(contents)
         try:
             results = await run_in_threadpool(ml_analyzer.analyze_terrain, contents)
+            results["fallback_triggered"] = False
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"ML Engine failed: {str(e)}")
+            # --- AEROSPACE REDUNDANCY: AUTOMATIC FALLBACK ---
+            # If the primary ML sensor fails (e.g. out of memory, crash), 
+            # gracefully degrade to the classical CV engine instead of crashing.
+            print(f"ML Engine Failed: {e}. Falling back to CV Engine.")
+            try:
+                results = await run_in_threadpool(cv_analyzer.analyze_terrain, contents)
+                results["fallback_triggered"] = True
+                results["stats"]["ai_model"] = "Failed (Fallback to CV)"
+            except Exception as cv_e:
+                raise HTTPException(status_code=500, detail=f"ML and CV Fallback both failed: {str(cv_e)}")
     else:
         # Run CV engine in a threadpool to prevent blocking the async event loop
         try:

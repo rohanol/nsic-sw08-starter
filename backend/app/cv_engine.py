@@ -140,7 +140,7 @@ class CVElevationAnalyzer:
                     "x": cx,
                     "y": cy,
                     "area": cv2.contourArea(cnt),
-                    "avg_risk": float(np.mean(risk_map[cy-5:cy+5, cx-5:cx+5]))
+                    "avg_risk": float(np.mean(risk_map[cy-5:cy+5, cx-5:cx+5]) / 100.0)
                 })
                 
         # 6. Generate Annotated Output Image for Frontend
