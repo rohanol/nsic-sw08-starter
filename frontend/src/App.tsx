@@ -9,14 +9,13 @@ import {
   Crosshair,
   Layers2,
   LoaderCircle,
-  ScanSearch,
   ShieldCheck,
   Upload,
   Waves,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties } from "react";
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.PROD ? "/api" : "http://localhost:8000")).replace(/\/$/, "");
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.PROD ? "/api" : "http://localhost:8000/api")).replace(/\/$/, "");
 const API_KEY = import.meta.env.VITE_API_KEY ?? "";
 
 type Engine = "cv" | "ml";
@@ -188,7 +187,7 @@ export default function App() {
       body.append("engine", engine);
       body.append("declared_target", "Mars");
       if (sourceUrl.trim()) body.append("source_url", sourceUrl.trim());
-      const response = await fetch(`${API_BASE_URL}/api/v1/assessments`, { method: "POST", headers: API_KEY ? { "X-Mission-Control-Key": API_KEY } : {}, body });
+      const response = await fetch(`${API_BASE_URL}/v1/assessments`, { method: "POST", headers: API_KEY ? { "X-Mission-Control-Key": API_KEY } : {}, body });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail ?? "The terrain service could not read this frame.");
       setAssessment(payload as Assessment);
