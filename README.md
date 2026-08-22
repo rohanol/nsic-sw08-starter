@@ -1,7 +1,7 @@
 <div align="center">
   <img src="https://img.icons8.com/?size=100&id=t79gB3yC64l4&format=png&color=000000" alt="Space Logo" width="100"/>
-  <h1>🚀 AegisLanding</h1>
-  <p><strong>Dual-Engine Planetary Landing Risk Assessment System</strong></p>
+  <h1>TerrainLens</h1>
+  <p><strong>Cinematic Mars Terrain Evidence and Landing-Risk Assessment</strong></p>
   
   <p>
     <img src="https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi" alt="FastAPI"/>
@@ -15,7 +15,7 @@
 ---
 
 ## 🌌 Overview
-AegisLanding is an edge-compute hazard detection system designed for autonomous spacecraft. When approaching a planetary body (like Mars), the lander captures overhead imagery and instantly calculates the safest landing zones by analyzing craters, rocks, and surface roughness.
+TerrainLens is a cinematic, scroll-led terrain evidence interface for the AegisLanding backend. It turns Mars surface imagery into a readable mission sequence: scroll-based descent context, upload-driven terrain inspection, visual-complexity review cells, safe-zone candidates, and independent model evidence when the source-provenance gate permits it.
 
 Built for the **NSIC SW08 Hackathon**, this project features a revolutionary **Dual-Engine Architecture** combining classical mathematical models with state-of-the-art Neural Networks.
 
@@ -24,7 +24,7 @@ Built for the **NSIC SW08 Hackathon**, this project features a revolutionary **D
 - 🛡️ **Aerospace redundancy:** If the independent analysis service is unavailable, the API returns the classical CV result with an explicit limitation note rather than silently fabricating model output.
 - 🔒 **Cryptographic Telemetry:** Every mission assessment is verified with an unforgeable SHA-256 cryptographic signature to prevent Man-in-the-Middle (MitM) data tampering.
 - 🛑 **Adversarial Anti-Spoofing:** Built-in high-frequency Laplacian variance scanners detect and reject synthetic or adversarial payloads designed to fool neural networks.
-- 📊 **Real-Time Dashboards:** A fully responsive React interface providing visual heatmaps, risk metrics, and annotated safe zones.
+- 📊 **TerrainLens evidence UI:** The supplied React frontend is now the repository frontend. It is wired to the secure assessment route, converts returned review cells and safe zones into in-scene annotations, and uses portable image/video assets stored under `frontend/public/terrainlens`.
 
 ## 🐳 Quickstart (Docker)
 The stack runs the FastAPI application alongside the independent Node/ONNX analysis sidecar. The sidecar is built from the pinned `analysis-tools-for-22` submodule; it is not copied or modified inside this repository.
