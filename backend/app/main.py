@@ -14,6 +14,9 @@ from app.cv_engine import CVElevationAnalyzer
 from app.ml_engine import MLElevationAnalyzer
 from app.database import init_db, log_assessment, get_audit_history
 from app.mars_gate import mars_only_gate
+from app.kalman_filter import mission_tracker
+from app.ccsds_encoder import generate_ccsds_packet
+from fastapi.responses import Response
 
 app = FastAPI(
     title="AegisLanding API with Dual Engines",
@@ -157,6 +160,16 @@ async def create_assessment(
     if "error" in results.get("stats", {}):
         raise HTTPException(status_code=400, detail=results["stats"]["error"])
         
+    # --- AEROSPACE NAVIGATION: KALMAN FILTER TRACKING ---
+    if results.get("safe_zones"):
+        best_zone = results["safe_zones"][0]
+        # Update the tracking state with the new observation
+        mission_tracker.update([best_zone["x"], best_zone["y"]])
+        # Predict where the landing zone will be on the next frame
+        pred_x, pred_y = mission_tracker.predict()
+        results["stats"]["ekf_predicted_next_x"] = float(round(pred_x, 2))
+        results["stats"]["ekf_predicted_next_y"] = float(round(pred_y, 2))
+
     # Log to audit database (Killer Hackathon Feature)
     log_assessment(engine, results["stats"], results["safe_zones"])
         
@@ -176,3 +189,22 @@ def get_assessment_history(limit: int = 10):
     """
     logs = get_audit_history(limit)
     return {"history": logs}
+
+@app.get("/api/v1/assessments/latest/ccsds", dependencies=[Depends(get_api_key)])
+def download_latest_ccsds():
+    """
+    Downloads the most recent mission telemetry encoded as a raw binary 
+    CCSDS Space Packet (Packet Utilization Standard), exactly as used by NASA.
+    """
+    logs = get_audit_history(1)
+    if not logs:
+        raise HTTPException(status_code=404, detail="No telemetry available to encode.")
+        
+    latest_log = logs[0]
+    binary_packet = generate_ccsds_packet(latest_log["stats"], latest_log["safe_zones"])
+    
+    return Response(
+        content=binary_packet,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": "attachment; filename=aegis_telemetry.bin"}
+    )
