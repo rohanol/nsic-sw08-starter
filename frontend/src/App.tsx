@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties } from "react";
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.PROD ? "/api" : "http://localhost:8000/api")).replace(/\/$/, "");
+const API_BASE_URL = (import.meta.env.PROD ? "/api" : (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api")).replace(/\/$/, "");
 const API_KEY = import.meta.env.VITE_API_KEY ?? "";
 
 type Engine = "cv" | "ml";
@@ -23,14 +23,16 @@ type Severity = "low" | "medium" | "high";
 type Zone = { id: string; x: number; y: number; area: number; avg_risk: number };
 type ReviewCell = { rank: number; row: number; column: number; score: number; edgeDensity?: number; textureVariance?: number; contrast?: number };
 type TerrainRow = { id: string; label: string; note: string; severity: Severity; x: string; y: string; score?: number };
+type Gate = { status: "accepted" | "unknown" | "blocked"; reason: string; runMarsModel: boolean; runVisualComplexity: boolean };
 type Assessment = {
   analysisId?: string;
   engine_used?: string;
   stats?: Record<string, string | number>;
   safe_zones?: Zone[];
   images?: Record<string, string>;
-  model?: { classCoverage?: Array<{ className: string; share: number }> };
-  visualComplexity?: { grid?: { columns: number; rows: number }; topReviewCells?: ReviewCell[] };
+  gate?: Gate;
+  model?: { classCoverage?: Array<{ className: string; share: number }>; overlayUrl?: string } | null;
+  visualComplexity?: { grid?: { columns: number; rows: number }; topReviewCells?: ReviewCell[]; overlayUrl?: string } | null;
   limitations?: string[];
 };
 
@@ -62,7 +64,7 @@ function rowsFor(assessment: Assessment | null): TerrainRow[] {
   return cells.slice(0, 3).map((cell, index) => ({
     id: String(index + 1).padStart(2, "0"),
     label: `Review cell ${cell.row + 1}.${cell.column + 1}`,
-    note: `Complexity score ${cell.score.toFixed(2)}`,
+    note: `Relative complexity ${cell.score.toFixed(2)}`,
     severity: severityFor(cell.score),
     x: `${Math.round(((cell.column + 0.5) / grid.columns) * 100)}%`,
     y: `${Math.round(((cell.row + 0.5) / grid.rows) * 100)}%`,
@@ -70,14 +72,13 @@ function rowsFor(assessment: Assessment | null): TerrainRow[] {
   }));
 }
 
-function EnginePanel({ name, descriptor, confidence, variance, metric, findings, tone }: {
-  name: string; descriptor: string; confidence: number; variance: string; metric: string; findings: string[]; tone: "cv" | "ml";
+function EnginePanel({ name, descriptor, interpretation, findings, tone }: {
+  name: string; descriptor: string; interpretation: string; findings: string[]; tone: "cv" | "ml";
 }) {
   return (
     <article className={`engine-panel engine-panel--${tone}`}>
       <div className="engine-panel__topline"><div><p className="eyebrow">{name}</p><h3>{descriptor}</h3></div><span className="engine-seal"><ShieldCheck size={16} /></span></div>
-      <div className="confidence-block"><div className="confidence-block__head"><span>Surface confidence</span><strong>{confidence}%</strong></div><div className="confidence-track" aria-label={`${name} surface confidence ${confidence}%`}><span style={{ width: `${confidence}%` }} /></div></div>
-      <dl className="engine-metrics"><div><dt>Vertical variance</dt><dd>{variance}</dd></div><div><dt>Fit metric</dt><dd>{metric}</dd></div></dl>
+      <dl className="engine-metrics"><div><dt>Interpretation</dt><dd>{interpretation}</dd></div></dl>
       <ul className="engine-findings">{findings.map((finding, index) => <li key={finding}><span>{String(index + 1).padStart(2, "0")}</span>{finding}</li>)}</ul>
     </article>
   );
@@ -111,9 +112,15 @@ export default function App() {
   const activeTerrain = terrainRows.find((terrain) => terrain.id === activeAnomaly) ?? terrainRows[0];
   const zones = assessment?.safe_zones ?? [];
   const stats = assessment?.stats ?? {};
+  const gate = assessment?.gate;
   const outputImage = assessment?.images?.modelOverlay ?? assessment?.images?.complexityOverlay ?? assessment?.images?.annotated ?? "/terrainlens/terrain-scan.jpg";
-  const bestRisk = zones[0]?.avg_risk;
   const modelCoverage = assessment?.model?.classCoverage ?? [];
+  const modelRan = Boolean(gate?.runMarsModel && assessment?.model);
+  const gateMessage = !gate
+    ? "Mars model status awaits an upload."
+    : modelRan
+      ? "Mars source verified — terrain model ran."
+      : `Mars model withheld — ${gate.reason}`;
   const sceneIndex = Math.min(scrollScenes.length - 1, Math.floor(sceneProgress * scrollScenes.length));
   const currentScene = scrollScenes[sceneIndex];
 
@@ -178,7 +185,9 @@ export default function App() {
 
   const runAssessment = async (file: File) => {
     if (!/^image\/(jpeg|png|webp)$/.test(file.type)) { setNotice("Use a JPG, PNG, or WEBP terrain frame."); return; }
-    if (file.size > 10 * 1024 * 1024) { setNotice("Use a terrain frame smaller than 10 MB."); return; }
+    const maximumUploadBytes = import.meta.env.PROD ? 4 * 1024 * 1024 : 10 * 1024 * 1024;
+    const maximumUploadLabel = import.meta.env.PROD ? "4 MB" : "10 MB";
+    if (file.size > maximumUploadBytes) { setNotice(`Use a terrain frame smaller than ${maximumUploadLabel}.`); return; }
     setIsAnalyzing(true);
     setNotice("TerrainLens is reading the frame and assembling evidence.");
     try {
@@ -207,8 +216,20 @@ export default function App() {
   };
 
   const engineRows = [
-    { name: "SURFACE VIEW", descriptor: "Ranks open ground", confidence: bestRisk === undefined ? 74 : Math.max(1, Math.round((1 - bestRisk) * 100)), variance: `${zones.length || 0} zones`, metric: bestRisk === undefined ? "Awaiting frame" : `${Math.round((1 - bestRisk) * 100)}% clear`, findings: terrainRows.map((row) => row.label), tone: "cv" as const },
-    { name: "TERRAIN MODEL", descriptor: assessment?.model ? "Reads terrain classes" : "Visual complexity evidence", confidence: assessment?.model ? 91 : 68, variance: assessment?.model ? "4 terrain classes" : "Model gated", metric: assessment?.model ? "Semantic evidence" : "Review evidence", findings: modelCoverage.length ? modelCoverage.map((item) => `${item.className} ${Math.round(item.share * 100)}%`) : terrainRows.map((row) => row.note), tone: "ml" as const },
+    {
+      name: "MARS TERRAIN MODEL",
+      descriptor: modelRan ? "Predicted terrain coverage" : "Model result unavailable",
+      interpretation: modelRan ? "Each value is a share of output pixels, not a safety score or per-image accuracy." : gateMessage,
+      findings: modelRan && modelCoverage.length ? modelCoverage.map((item) => `${item.className} — ${Math.round(item.share * 100)}% predicted pixel share`) : [gateMessage],
+      tone: "ml" as const,
+    },
+    {
+      name: "VISUAL COMPLEXITY",
+      descriptor: assessment?.visualComplexity?.topReviewCells?.length ? "Top review cells" : "Visual evidence unavailable",
+      interpretation: "Higher values identify relatively more visually complex areas within this image; they do not mean danger or safety.",
+      findings: assessment?.visualComplexity?.topReviewCells?.length ? assessment.visualComplexity.topReviewCells.slice(0, 3).map((cell) => `Review cell ${cell.row + 1}.${cell.column + 1} — Relative complexity ${cell.score.toFixed(2)}`) : ["No visual-complexity result was returned for this analysis."],
+      tone: "cv" as const,
+    },
   ];
   const analysisStyle = { "--analysis-progress": analysisProgress } as CSSProperties;
   const comparisonStyle = { "--comparison-progress": comparisonProgress } as CSSProperties;
@@ -230,15 +251,15 @@ export default function App() {
 
       <section ref={sceneRef} id="top" className="hero-scroll"><div className="hero-stage"><div className="hero-stage__grain" aria-hidden="true" /><img className="hero-stage__image" src="/terrainlens/deep-space.jpg" alt="Deep space and galaxy backdrop" /><div className="hero-stage__veil" aria-hidden="true" /><div className="hero-orbit orbit-one" /><div className="hero-orbit orbit-two" /><div className="hero-orbit orbit-three" /><div className="scene-quadrants" aria-hidden="true"><span /><span /><span /><span /></div><div className="scene-object" style={sceneObjectStyle} aria-hidden="true"><img src="/terrainlens/mars-whole-planet.jpg" alt="" /></div><div className="scene-copy" key={currentScene.code}><h1>{currentScene.title}</h1><p className="hero-copy__body">{currentScene.body}</p><button className="primary-cta" onClick={() => sceneIndex === scrollScenes.length - 1 ? moveTo("protocol") : jumpToScene(sceneIndex + 1)}>{sceneIndex === scrollScenes.length - 1 ? "Load terrain" : "Keep scrolling"}<ArrowDownRight size={18} /></button></div></div></section>
 
-      <section ref={descentRef} id="descent" className="descent-scroll"><div className="descent-record" style={descentStyle}><video ref={descentVideoRef} className="descent-background" muted playsInline preload="auto" poster="/terrainlens/rover-dawn.jpg" aria-label="Mars landing sequence controlled by scroll position"><source src="/terrainlens/descent.mp4" type="video/mp4" /></video><div className="descent-background__veil" /><div className="chapter-rail" aria-hidden="true"><p>01</p><span /><p>LANDING</p></div><div className="descent-record__intro"><h2>See the landing<br /><em>before it happens.</em></h2><p>Scroll to follow the craft to the ground.</p></div><div className="landing-annotation landing-annotation--one"><span>01</span><p>Approach<br /><strong>Watch the ground</strong></p></div><div className="landing-annotation landing-annotation--two"><span>02</span><p>Landing area<br /><strong>{zones[0] ? `Best zone ${zones[0].id}` : "Open path ahead"}</strong></p></div><div className="descent-stats"><article><p>Rocks</p><strong>{stats.rocks_detected ?? "—"}</strong><span>detected</span></article><article><p>Roughness</p><strong>{stats.global_roughness_index ?? "—"}</strong><span>surface read</span></article><article><p>Ground</p><strong>{bestRisk === undefined ? "Scan" : `${Math.round((1 - bestRisk) * 100)}%`}</strong><span>{bestRisk === undefined ? "awaiting frame" : "clear estimate"}</span></article></div></div></section>
+      <section ref={descentRef} id="descent" className="descent-scroll"><div className="descent-record" style={descentStyle}><video ref={descentVideoRef} className="descent-background" muted playsInline preload="auto" poster="/terrainlens/rover-dawn.jpg" aria-label="Mars landing sequence controlled by scroll position"><source src="/terrainlens/descent.mp4" type="video/mp4" /></video><div className="descent-background__veil" /><div className="chapter-rail" aria-hidden="true"><p>01</p><span /><p>LANDING</p></div><div className="descent-record__intro"><h2>See the landing<br /><em>before it happens.</em></h2><p>Scroll to follow the craft to the ground.</p></div><div className="landing-annotation landing-annotation--one"><span>01</span><p>Approach<br /><strong>Watch the ground</strong></p></div><div className="landing-annotation landing-annotation--two"><span>02</span><p>Landing area<br /><strong>{zones[0] ? `Candidate ${zones[0].id}` : "Open path ahead"}</strong></p></div><div className="descent-stats"><article><p>Rocks</p><strong>{stats.rocks_detected ?? "—"}</strong><span>detected</span></article><article><p>Roughness</p><strong>{stats.global_roughness_index ?? "—"}</strong><span>surface read</span></article><article><p>Candidate zones</p><strong>{assessment ? zones.length : "Scan"}</strong><span>{assessment ? "CV review areas" : "awaiting frame"}</span></article></div></div></section>
 
-      <section ref={analysisRef} id="analysis" className="analysis-scroll"><div className="analysis-surface" style={analysisStyle}><div className="section-side-label">02 / CHECK</div><div className="analysis-surface__background"><img src={assessment?.images?.complexityOverlay ?? "/terrainlens/analysis-surface.jpg"} alt="Terrain evidence background" /></div><div className="analysis-header"><div><p className="eyebrow eyebrow--signal">02 / GROUND CHECK</p><h2>Look at the ground<br /><em>two ways.</em></h2></div><p>{assessment ? "Tap a marked review cell to see its evidence." : "Upload a frame to map surface evidence here."}</p></div><div className="analysis-sequence" aria-hidden="true"><span className={analysisProgress < 0.34 ? "analysis-sequence__step analysis-sequence__step--active" : "analysis-sequence__step"}>SEE</span><span className={analysisProgress >= 0.34 && analysisProgress < 0.67 ? "analysis-sequence__step analysis-sequence__step--active" : "analysis-sequence__step"}>MARK</span><span className={analysisProgress >= 0.67 ? "analysis-sequence__step analysis-sequence__step--active" : "analysis-sequence__step"}>CHECK</span></div><div className="analysis-workspace"><aside className="analysis-aside"><div className="aside-heading"><Crosshair size={17} /><span>GROUND VIEW</span></div><div className="anomaly-list"><p className="eyebrow">Things to check</p>{terrainRows.map((terrain) => <button key={terrain.id} className={activeAnomaly === terrain.id ? "anomaly-row anomaly-row--active" : "anomaly-row"} onClick={() => setActiveAnomaly(terrain.id)}><span>{terrain.id}</span><div><strong>{terrain.label}</strong><small>{terrain.note}</small></div><i className={`risk risk--${terrain.severity}`} /></button>)}</div></aside><div className={`terrain-module ${isDragging ? "terrain-module--dragging" : ""}`}><div className="terrain-module__topbar"><span>Terrain evidence</span><span>{assessment ? "Live result" : "Sample frame"}</span></div><div className="terrain-view" onPointerDown={() => setIsDragging(true)} onPointerUp={() => setIsDragging(false)} onPointerLeave={() => setIsDragging(false)}><img src={outputImage} alt="Terrain analysis evidence" /><div className="scan-sweep" />{terrainRows.map((terrain) => <button key={terrain.id} className={activeAnomaly === terrain.id ? "terrain-pin terrain-pin--active" : "terrain-pin"} style={{ left: terrain.x, top: terrain.y }} onClick={() => setActiveAnomaly(terrain.id)} aria-label={`Inspect ${terrain.label}`}><span>{terrain.id}</span></button>)}<div className="target-bracket target-bracket--tl" /><div className="target-bracket target-bracket--tr" /><div className="target-bracket target-bracket--bl" /><div className="target-bracket target-bracket--br" /></div><div className="terrain-module__footer"><span><Waves size={15} />{assessment?.analysisId ? "Evidence linked" : "Awaiting frame"}</span><span>Looking at: <strong>{activeTerrain.label}</strong></span></div></div><aside className="active-readout"><p className="eyebrow">ON THIS SPOT</p><strong>{activeTerrain.id}</strong><h3>{activeTerrain.label}</h3><p>{activeTerrain.note}. Check this spot before landing.</p><dl><div><dt>Risk</dt><dd>{activeTerrain.severity}</dd></div><div><dt>Engine</dt><dd>{assessment?.engine_used ?? "TerrainLens"}</dd></div><div><dt>Next step</dt><dd>{zones[0] ? `Review ${zones[0].id}` : "Load frame"}</dd></div></dl><button onClick={() => moveTo("compare")}>See both views <ChevronRight size={16} /></button></aside></div></div></section>
+      <section ref={analysisRef} id="analysis" className="analysis-scroll"><div className="analysis-surface" style={analysisStyle}><div className="section-side-label">02 / CHECK</div><div className="analysis-surface__background"><img src={assessment?.images?.complexityOverlay ?? "/terrainlens/analysis-surface.jpg"} alt="Terrain evidence background" /></div><div className="analysis-header"><div><p className="eyebrow eyebrow--signal">02 / GROUND CHECK</p><h2>Look at the ground<br /><em>two ways.</em></h2></div><p>{assessment ? "Tap a marked review cell to inspect relative visual complexity." : "Upload a frame to map surface evidence here."}</p></div><div className="analysis-sequence" aria-hidden="true"><span className={analysisProgress < 0.34 ? "analysis-sequence__step analysis-sequence__step--active" : "analysis-sequence__step"}>SEE</span><span className={analysisProgress >= 0.34 && analysisProgress < 0.67 ? "analysis-sequence__step analysis-sequence__step--active" : "analysis-sequence__step"}>MARK</span><span className={analysisProgress >= 0.67 ? "analysis-sequence__step analysis-sequence__step--active" : "analysis-sequence__step"}>CHECK</span></div><div className="analysis-workspace"><aside className="analysis-aside"><div className="aside-heading"><Crosshair size={17} /><span>GROUND VIEW</span></div><div className="anomaly-list"><p className="eyebrow">Review areas</p>{terrainRows.map((terrain) => <button key={terrain.id} className={activeAnomaly === terrain.id ? "anomaly-row anomaly-row--active" : "anomaly-row"} onClick={() => setActiveAnomaly(terrain.id)}><span>{terrain.id}</span><div><strong>{terrain.label}</strong><small>{terrain.note}</small></div><i className={`risk risk--${terrain.severity}`} /></button>)}</div></aside><div className={`terrain-module ${isDragging ? "terrain-module--dragging" : ""}`}><div className="terrain-module__topbar"><span>Terrain evidence</span><span>{assessment ? "Live result" : "Sample frame"}</span></div><div className="terrain-view" onPointerDown={() => setIsDragging(true)} onPointerUp={() => setIsDragging(false)} onPointerLeave={() => setIsDragging(false)}><img src={outputImage} alt="Terrain analysis evidence" /><div className="scan-sweep" />{terrainRows.map((terrain) => <button key={terrain.id} className={activeAnomaly === terrain.id ? "terrain-pin terrain-pin--active" : "terrain-pin"} style={{ left: terrain.x, top: terrain.y }} onClick={() => setActiveAnomaly(terrain.id)} aria-label={`Inspect ${terrain.label}`}><span>{terrain.id}</span></button>)}<div className="target-bracket target-bracket--tl" /><div className="target-bracket target-bracket--tr" /><div className="target-bracket target-bracket--bl" /><div className="target-bracket target-bracket--br" /></div><div className="terrain-module__footer"><span><Waves size={15} />{assessment?.analysisId ? "Evidence linked" : "Awaiting frame"}</span><span>Looking at: <strong>{activeTerrain.label}</strong></span></div></div><aside className="active-readout"><p className="eyebrow">ON THIS SPOT</p><strong>{activeTerrain.id}</strong><h3>{activeTerrain.label}</h3><p>{activeTerrain.note}. This is an evidence-review priority, not a landing-safety determination.</p><dl><div><dt>Evidence</dt><dd>{activeTerrain.score === undefined ? "Awaiting frame" : `Relative complexity ${activeTerrain.score.toFixed(2)}`}</dd></div><div><dt>Mars model</dt><dd>{gate ? (modelRan ? "Source verified" : "Withheld") : "Awaiting frame"}</dd></div><div><dt>Next step</dt><dd>Review image context</dd></div></dl><button onClick={() => moveTo("compare")}>See both views <ChevronRight size={16} /></button></aside></div></div></section>
 
-      <section ref={comparisonRef} id="compare" className="comparison-scroll"><div className="engine-comparison" style={comparisonStyle}><div className="section-side-label">03 / COMPARE</div><div className="comparison-heading"><p className="eyebrow eyebrow--signal">03 / TWO VIEWS</p><div><h2>Double check<br /><em>the ground.</em></h2></div></div><div className="engine-grid">{engineRows.map((row) => <EnginePanel key={row.name} {...row} />)}</div><div className="comparison-note"><Layers2 size={18} /><p><strong>{assessment ? "Evidence assembled:" : "Two views:"}</strong> {assessment ? "use the landing candidates and review cells together." : "upload a terrain frame to compare surface and model evidence."}</p><span>{assessment ? "READY" : "STANDBY"}</span></div></div></section>
+      <section ref={comparisonRef} id="compare" className="comparison-scroll"><div className="engine-comparison" style={comparisonStyle}><div className="section-side-label">03 / COMPARE</div><div className="comparison-heading"><p className="eyebrow eyebrow--signal">03 / TWO VIEWS</p><div><h2>Double check<br /><em>the ground.</em></h2></div></div><div className="engine-grid">{engineRows.map((row) => <EnginePanel key={row.name} {...row} />)}</div><div className="comparison-note"><Layers2 size={18} /><p><strong>{assessment ? gateMessage : "Evidence path:"}</strong> {assessment ? "Use terrain coverage and review cells as inspection evidence, not landing clearance." : "upload a terrain frame to compare visual evidence with a provenance-gated model result."}</p><span>{assessment ? "READY" : "STANDBY"}</span></div></div></section>
 
       <section ref={protocolRef} id="protocol" className="protocol-section"><div className="section-side-label section-side-label--dark">04 / UPLOAD</div><div className="protocol-section__media"><img src={outputImage} alt="Terrain analysis sample" /></div><div className="protocol-section__copy"><p className="eyebrow eyebrow--signal">MISSION PROTOCOL</p><h2>Let the image<br />answer <em>twice.</em></h2><p>{notice}</p><div className="upload-control"><div className="engine-toggle"><button className={engine === "cv" ? "active" : ""} onClick={() => setEngine("cv")}>Surface scan</button><button className={engine === "ml" ? "active" : ""} onClick={() => setEngine("ml")}>Verified Mars model</button></div>{engine === "ml" && <input value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} placeholder="Direct NASA/JPL image URL for semantic model" aria-label="Verified Mars source URL" />}<button className="primary-cta" onClick={() => fileInputRef.current?.click()} disabled={isAnalyzing}>{isAnalyzing ? <><LoaderCircle className="spin" size={17} /> Reading frame</> : <><Upload size={17} /> Load a terrain frame</>}</button></div><small className="upload-note">The verified Mars model runs only when uploaded bytes exactly match a direct HTTPS image from an approved NASA or JPL source. Other images still receive visual-complexity evidence.</small></div></section>
 
-      <footer className="mission-footer"><button className="brand-lockup brand-lockup--terrain" onClick={() => moveTo("top")}><img src="/terrainlens/orbital-shield.png" alt="" /><span>TerrainLens</span></button><p>Clear terrain before landing.</p><span>© 2026 / MARS 07</span></footer>
+      <footer className="mission-footer"><button className="brand-lockup brand-lockup--terrain" onClick={() => moveTo("top")}><img src="/terrainlens/orbital-shield.png" alt="" /><span>TerrainLens</span></button><p>Read terrain evidence before landing.</p><span>© 2026 / MARS 07</span></footer>
     </main>
   );
 }

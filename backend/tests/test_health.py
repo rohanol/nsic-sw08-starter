@@ -55,7 +55,15 @@ def test_assessment_merges_independent_visual_evidence(monkeypatch) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["analysisId"] == "independent-test-1"
+    assert body["gate"] == {
+        "status": "unknown",
+        "reason": "The image is declared as Mars but its source was not verified by the backend. A trusted-looking URL alone cannot authorize the Mars-trained model; generic visual-complexity analysis may run.",
+        "runMarsModel": False,
+        "runVisualComplexity": True,
+    }
     assert body["visualComplexity"]["topReviewCells"][0]["score"] == 0.91
+    assert "overlayPng" not in body["visualComplexity"]
+    assert body["visualComplexity"]["overlayUrl"].startswith("data:image/png;base64,")
     assert body["images"]["complexityOverlay"].startswith("data:image/png;base64,")
     assert body["safe_zones"]
 

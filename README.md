@@ -70,6 +70,19 @@ This initializes the model submodule, installs dependencies, and starts the Reac
 
 The API requires `MISSION_CONTROL_KEY` to start. In production, Nginx receives this key as a container environment variable and injects it only while proxying `/api` to the internal backend. Do not set `VITE_API_KEY` in a production build.
 
+### Vercel frontend with a separately hosted Render API
+
+The `frontend/api/v1/assessments.js` serverless route forwards browser uploads to Render while keeping `MISSION_CONTROL_KEY` on Vercel. This is required because a static Vite application must not embed a backend authorization key in its browser bundle.
+
+Configure these **server-side** Vercel environment variables, then redeploy the `frontend/` project:
+
+| Vercel variable | Value |
+|---|---|
+| `RENDER_API_BASE_URL` | `https://<your-render-backend>.onrender.com` without a trailing `/api` path |
+| `MISSION_CONTROL_KEY` | The same newly generated value configured on the Render FastAPI service |
+
+The production frontend calls its same-origin `/api/v1/assessments` route. The Vercel proxy adds the secret header internally and forwards the multipart body to Render. Public Vercel uploads are capped at **4 MiB** by this proxy; the container-based deployment continues to accept the backend limit of 10 MiB.
+
 The Mars-trained semantic model runs only when the submitted image bytes exactly match a direct HTTPS image from an approved NASA or JPL domain. The backend rejects redirects outside that allowlist, requires an image MIME type, and applies configurable time and response-size limits. Other uploads still receive generic visual-complexity evidence, clearly labelled as non-semantic analysis.
 
 | Setting | Required | Purpose |

@@ -89,6 +89,7 @@ class AssessmentResponse(BaseModel):
     stats: dict[str, Any]
     safe_zones: list[dict[str, Any]]
     images: dict[str, str]
+    gate: Optional[dict[str, Any]] = None
     fallback_triggered: Optional[bool] = False
     analysisId: Optional[str] = None
     engine_used: Optional[str] = None
@@ -150,8 +151,9 @@ def attach_independent_evidence(
     cv_results: dict[str, Any],
     independent: dict[str, Any],
     engine: str,
+    gate_status: str,
     gate_reason: str,
-    model_ran: bool,
+    model_authorized: bool,
 ) -> dict[str, Any]:
     images = dict(cv_results.get("images", {}))
     source = independent.get("source") or {}
@@ -159,20 +161,34 @@ def attach_independent_evidence(
     if source_png:
         images["source"] = source_png
 
-    model = independent.get("model")
-    if model:
-        overlay = to_data_uri(model.get("overlayPng"))
-        mask = to_data_uri(model.get("maskPng"))
+    raw_model = independent.get("model")
+    model: dict[str, Any] | None = None
+    if raw_model:
+        overlay = to_data_uri(raw_model.get("overlayPng"))
+        mask = to_data_uri(raw_model.get("maskPng"))
         if overlay:
             images["modelOverlay"] = overlay
         if mask:
             images["mask"] = mask
+        model = {
+            "classCoverage": raw_model.get("classCoverage", []),
+            **({"overlayUrl": overlay} if overlay else {}),
+            **({"maskUrl": mask} if mask else {}),
+        }
 
-    visual = independent.get("visualComplexity") or {}
+    raw_visual = independent.get("visualComplexity") or {}
     for output_key, response_key in (("overlayPng", "complexityOverlay"), ("edgeMapPng", "edgeMap"), ("textureMapPng", "textureMap")):
-        artifact = to_data_uri(visual.get(output_key))
+        artifact = to_data_uri(raw_visual.get(output_key))
         if artifact:
             images[response_key] = artifact
+    visual = {
+        "grid": raw_visual.get("grid"),
+        "topReviewCells": raw_visual.get("topReviewCells", []),
+        **({"overlayUrl": images["complexityOverlay"]} if images.get("complexityOverlay") else {}),
+        **({"edgeMapUrl": images["edgeMap"]} if images.get("edgeMap") else {}),
+        **({"textureMapUrl": images["textureMap"]} if images.get("textureMap") else {}),
+    }
+    model_ran = model_authorized and model is not None
 
     stats = dict(cv_results.get("stats", {}))
     stats.update({
@@ -189,6 +205,12 @@ def attach_independent_evidence(
         "stats": stats,
         "safe_zones": cv_results.get("safe_zones", []),
         "images": images,
+        "gate": {
+            "status": gate_status,
+            "reason": gate_reason,
+            "runMarsModel": model_ran,
+            "runVisualComplexity": bool(raw_visual),
+        },
         "source": {key: source.get(key) for key in ("filename", "width", "height") if source.get(key) is not None},
         "model": model,
         "visualComplexity": visual,
@@ -315,11 +337,19 @@ async def create_assessment(
     mode = "full" if engine == "ml" and gate_decision.run_mars_model else "visual-only"
     try:
         independent = await run_in_threadpool(analysis_client.analyze, file.filename or "terrain-image", contents, mode)
-        results = attach_independent_evidence(cv_results, independent, engine, gate_decision.reason, mode == "full")
+        results = attach_independent_evidence(cv_results, independent, engine, gate_decision.status, gate_decision.reason, mode == "full")
     except AnalysisServiceError as error:
         results = {
             **cv_results,
             "engine_used": "cv-fallback",
+            "gate": {
+                "status": gate_decision.status,
+                "reason": gate_decision.reason,
+                "runMarsModel": False,
+                "runVisualComplexity": False,
+            },
+            "model": None,
+            "visualComplexity": None,
             "limitations": [gate_decision.reason, str(error), "Independent evidence was unavailable; the response contains classical CV output only."],
             "fallback_triggered": True,
         }
