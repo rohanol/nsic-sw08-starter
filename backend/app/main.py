@@ -24,9 +24,19 @@ from fastapi.responses import Response
 
 app = FastAPI(
     title="AegisLanding API with Dual Engines",
-    version="0.4.0",
+    version="0.5.0",
     description="Backend API for NSIC SW08 AI-Based Landing Risk Assessment.",
 )
+
+# --- PERFORMANCE: REQUEST TIMING MIDDLEWARE ---
+# Injects X-Process-Time-Ms into every response header
+@app.middleware("http")
+async def add_process_time_header(request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    process_time_ms = round((time.time() - start_time) * 1000, 2)
+    response.headers["X-Process-Time-Ms"] = str(process_time_ms)
+    return response
 
 # --- SECURITY: API KEY AUTHENTICATION ---
 API_KEY_NAME = "X-Mission-Control-Key"
@@ -155,6 +165,59 @@ def health() -> dict[str, Any]:
         "service": "aegislanding-api"
     }
 
+@app.get("/api/v1/status", dependencies=[Depends(get_api_key)])
+def system_status() -> dict[str, Any]:
+    """
+    Live system status dashboard. Reports the operational state of every
+    subsystem: CV engine, Analysis Sidecar, SQLite DB, and EKF Tracker.
+    """
+    import sqlite3
+    subsystems = {}
+    
+    # 1. CV Engine
+    subsystems["cv_engine"] = {"status": "online", "lander_size_px": cv_analyzer.lander_size_px}
+    
+    # 2. Analysis Sidecar (ONNX Model)
+    try:
+        import httpx
+        r = httpx.get(f"{analysis_client.base_url}/health", timeout=3.0)
+        subsystems["analysis_sidecar"] = {"status": "online" if r.status_code == 200 else "degraded", "url": analysis_client.base_url}
+    except Exception:
+        subsystems["analysis_sidecar"] = {"status": "offline", "url": analysis_client.base_url}
+    
+    # 3. SQLite Telemetry DB
+    try:
+        from app.database import DB_PATH
+        conn = sqlite3.connect(DB_PATH)
+        count = conn.execute("SELECT COUNT(*) FROM audit_logs").fetchone()[0]
+        conn.close()
+        subsystems["telemetry_db"] = {"status": "online", "total_assessments": count}
+    except Exception:
+        subsystems["telemetry_db"] = {"status": "offline"}
+    
+    # 4. EKF Tracker
+    subsystems["ekf_tracker"] = {
+        "status": "online" if mission_tracker.initialized else "awaiting_first_observation",
+        "state_vector": [float(round(v, 2)) for v in mission_tracker.state.tolist()]
+    }
+    
+    # 5. Security modules
+    subsystems["security"] = {
+        "api_key_auth": "enabled",
+        "rate_limiter": f"{RATE_LIMIT_SECONDS}s cooldown",
+        "adversarial_scanner": "enabled (Laplacian variance > 15000)",
+        "cryptographic_signatures": "SHA-256",
+        "mars_provenance_gate": "enabled"
+    }
+    
+    all_online = all(s.get("status") in ("online", "awaiting_first_observation") for s in subsystems.values() if isinstance(s, dict) and "status" in s)
+    
+    return {
+        "system_status": "ALL SYSTEMS NOMINAL" if all_online else "DEGRADED — CHECK SUBSYSTEMS",
+        "api_version": "0.5.0",
+        "subsystems": subsystems
+    }
+
 @app.post("/api/v1/assessments", response_model=AssessmentResponse, dependencies=[Depends(get_api_key)])
 async def create_assessment(
     file: UploadFile = File(...),
@@ -232,6 +295,11 @@ async def create_assessment(
         pred_x, pred_y = mission_tracker.predict()
         results["stats"]["ekf_predicted_next_x"] = float(round(pred_x, 2))
         results["stats"]["ekf_predicted_next_y"] = float(round(pred_y, 2))
+
+    # --- PROCESSING METADATA ---
+    results["stats"]["laplacian_variance"] = float(round(laplacian_var, 2)) if gray_img is not None else None
+    results["stats"]["gate_status"] = gate_decision.status
+    results["stats"]["gate_reason"] = gate_decision.reason
 
     # Log to audit database (Killer Hackathon Feature)
     log_assessment(engine, results["stats"], results["safe_zones"])
